@@ -1,0 +1,14 @@
+# Data directory for form submissions
+# Ignore data files
+data/
+data.db
+
+# Generated files
+generated/
+bin/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo

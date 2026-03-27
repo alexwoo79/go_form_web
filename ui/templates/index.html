@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Go-Web 表单中心</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 40px 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        
+        /* 顶部导航 */
+        .header-nav {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 20px;
+        }
+        .nav-link {
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s;
+            background: rgba(255,255,255,0.2);
+        }
+        .nav-link:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+        }
+        
+        h1 { text-align: center; color: white; margin-bottom: 10px; font-size: 2.5em; text-shadow: 2px 2px 4px rgba(0,0,0,0.2); }
+        .subtitle { text-align: center; color: rgba(255,255,255,0.9); margin-bottom: 40px; font-size: 1.1em; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 30px; }
+        .form-card { background: white; border-radius: 16px; padding: 30px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); transition: all 0.3s ease; }
+        .form-card:hover { transform: translateY(-5px); box-shadow: 0 15px 50px rgba(0,0,0,0.15); }
+        .form-card h3 { color: #2c3e50; margin-bottom: 10px; font-size: 1.5em; }
+        .form-card .description { color: #7f8c8d; margin-bottom: 20px; line-height: 1.6; }
+        .form-link { display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; border-radius: 8px; font-weight: 600; transition: all 0.3s; }
+        .form-link:hover { transform: scale(1.05); box-shadow: 0 5px 15px rgba(102,126,234,0.4); }
+        .empty-state { text-align: center; padding: 60px 20px; color: white; }
+        .empty-state h2 { font-size: 2em; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 顶部导航 -->
+        <div class="header-nav">
+            {{if .LoggedIn}}
+            <a href="/admin" class="nav-link">🔧 管理后台</a>
+            <a href="/logout" class="nav-link">退出登录</a>
+            {{else}}
+            <a href="/login" class="nav-link">管理员登录</a>
+            {{end}}
+        </div>
+        
+        <h1>📝 表单中心</h1>
+        <p class="subtitle">请选择要填写的表单</p>
+
+        {{if .Forms}}
+        <div class="form-grid">
+            {{range .Forms}}
+            <div class="form-card">
+                <h3>{{.Title}}</h3>
+                <p class="description">{{.Description}}</p>
+                <a href="/forms/{{.Name}}" class="form-link">填写表单</a>
+            </div>
+            {{end}}
+        </div>
+        {{else}}
+        <div class="empty-state">
+            <h2>暂时没有可用的表单</h2>
+            <p>请检查配置文件或添加新的表单定义</p>
+        </div>
+        {{end}}
+    </div>
+</body>
+</html>

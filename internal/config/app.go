@@ -1,0 +1,80 @@
+package config
+
+import (
+	"go-web/internal/handler"
+	"go-web/internal/models"
+	"net/http"
+)
+
+type App struct {
+	config  *Config
+	handler *handler.Handler
+	db      *models.Database
+}
+
+func NewApp(configPath string) (*App, error) {
+	cfg, err := Load(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	db, err := models.NewDatabase(cfg.Database.Path, cfg.Database.Type)
+	if err != nil {
+		return nil, err
+	}
+
+	// 转换表单配置
+	formInfos := make([]handler.FormInfo, 0, len(cfg.Forms))
+	for _, fc := range cfg.Forms {
+		fields := make([]handler.FieldInfo, 0, len(fc.Fields))
+		for _, f := range fc.Fields {
+			fields = append(fields, handler.FieldInfo{
+				Name:        f.Name,
+				Label:       f.Label,
+				Type:        f.Type,
+				Placeholder: f.Placeholder,
+				Required:    f.Required,
+				Options:     f.Options,
+				Min:         f.Min,
+				Max:         f.Max,
+			})
+		}
+
+		formInfos = append(formInfos, handler.FormInfo{
+			Name:          fc.Name,
+			Title:         fc.Title,
+			Description:   fc.Description,
+			DataDirectory: fc.DataDirectory,
+			Model:         struct{ TableName string }{TableName: fc.Model.TableName},
+			Fields:        fields,
+		})
+	}
+
+	h := handler.New(db, formInfos)
+
+	return &App{
+		config:  cfg,
+		handler: h,
+		db:      db,
+	}, nil
+}
+
+func (a *App) Close() {
+	if a.db != nil {
+		a.db.Close()
+	}
+}
+
+func (a *App) Router() http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/", a.handler.IndexHandler)
+	mux.HandleFunc("/forms", a.handler.FormListHandler)
+	mux.HandleFunc("/forms/", a.handler.FormPageHandler)
+	mux.HandleFunc("/api/submit/", a.handler.SubmitHandler)
+
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("ui/static"))))
+	mux.Handle("/gen/", http.StripPrefix("/gen/", http.FileServer(http.Dir("generated"))))
+
+	return mux
+}
