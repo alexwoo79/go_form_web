@@ -2,12 +2,20 @@ package config
 
 import (
 	"go-web/internal/handler"
+	"go-web/ui"
+	"io/fs"
 	"net/http"
+
 	"github.com/gorilla/mux"
 )
 
 func NewRouter(h *handler.Handler) *mux.Router {
 	r := mux.NewRouter()
+
+	staticFS, err := fs.Sub(ui.Static, "static")
+	if err != nil {
+		panic("加载内嵌静态资源失败: " + err.Error())
+	}
 
 	// 公开路由
 	r.HandleFunc("/", h.IndexHandler).Methods("GET")
@@ -15,7 +23,7 @@ func NewRouter(h *handler.Handler) *mux.Router {
 	r.HandleFunc("/logout", h.LogoutHandler).Methods("GET", "POST")
 	r.HandleFunc("/forms", h.FormListHandler).Methods("GET")
 	r.HandleFunc("/forms/{formName}", h.FormPageHandler).Methods("GET")
-	
+
 	// API 路由（需要登录）
 	r.HandleFunc("/api/submit/{formName}", h.SubmitHandler).Methods("POST")
 	r.HandleFunc("/api/export/{formName}", h.RequireAdmin(h.ExportCSVHandler)).Methods("GET")
@@ -25,7 +33,7 @@ func NewRouter(h *handler.Handler) *mux.Router {
 	r.HandleFunc("/admin", h.RequireAdmin(h.AdminHandler)).Methods("GET")
 
 	// 静态文件
-	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("ui/static"))))
+	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 	r.PathPrefix("/gen/").Handler(http.StripPrefix("/gen/", http.FileServer(http.Dir("generated"))))
 
 	return r

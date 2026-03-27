@@ -16,7 +16,6 @@ forms:
   - name: "user_registration"
     title: "用户注册表单"
     description: "欢迎注册我们的服务，请填写以下信息"
-    data_directory: "data/user_registration"
     model:
       table_name: "user_registration"
     fields:
@@ -75,7 +74,6 @@ forms:
   - name: "product_feedback"
     title: "产品反馈表单"
     description: "感谢您的反馈，帮助我们改进产品"
-    data_directory: "data/product_feedback"
     model:
       table_name: "product_feedback"
     fields:

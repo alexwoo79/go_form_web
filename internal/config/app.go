@@ -3,6 +3,8 @@ package config
 import (
 	"go-web/internal/handler"
 	"go-web/internal/models"
+	"go-web/ui"
+	"io/fs"
 	"net/http"
 )
 
@@ -68,12 +70,17 @@ func (a *App) Close() {
 func (a *App) Router() http.Handler {
 	mux := http.NewServeMux()
 
+	staticFS, err := fs.Sub(ui.Static, "static")
+	if err != nil {
+		panic("加载内嵌静态资源失败: " + err.Error())
+	}
+
 	mux.HandleFunc("/", a.handler.IndexHandler)
 	mux.HandleFunc("/forms", a.handler.FormListHandler)
 	mux.HandleFunc("/forms/", a.handler.FormPageHandler)
 	mux.HandleFunc("/api/submit/", a.handler.SubmitHandler)
 
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("ui/static"))))
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 	mux.Handle("/gen/", http.StripPrefix("/gen/", http.FileServer(http.Dir("generated"))))
 
 	return mux

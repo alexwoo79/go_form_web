@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-web/internal/models"
+	"go-web/ui"
 	"html/template"
 	"io"
 	"io/ioutil"
@@ -19,11 +20,16 @@ import (
 	"time"
 )
 
+func renderTemplate(w http.ResponseWriter, name string, data interface{}) {
+	tmpl := template.Must(template.ParseFS(ui.Templates, "templates/"+name))
+	tmpl.Execute(w, data)
+}
+
 // User 用户模型
 type User struct {
 	ID       int    `json:"id"`
 	Username string `json:"username"`
-	Password string `json:"-"` // 不序列化到 JSON
+	Password string `json:"-"`    // 不序列化到 JSON
 	Role     string `json:"role"` // "admin" 或 "user"
 }
 
@@ -101,10 +107,10 @@ func (sm *SessionManager) CleanupExpiredSessions() {
 }
 
 type Handler struct {
-	db           *models.Database
-	formMap      map[string]FormInfo
-	sessionMgr   *SessionManager
-	adminUsers   map[string]string // username -> password hash
+	db         *models.Database
+	formMap    map[string]FormInfo
+	sessionMgr *SessionManager
+	adminUsers map[string]string // username -> password hash
 }
 
 type FormInfo struct {
@@ -239,10 +245,9 @@ func (h *Handler) IndexHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	tmpl := template.Must(template.ParseFiles("ui/templates/index.html"))
-	tmpl.Execute(w, map[string]interface{}{
-		"Forms":     formList,
-		"LoggedIn":  h.isLoggedIn(r),
+	renderTemplate(w, "index.html", map[string]interface{}{
+		"Forms":    formList,
+		"LoggedIn": h.isLoggedIn(r),
 	})
 }
 
@@ -275,11 +280,11 @@ func (h *Handler) FormPageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	form := map[string]interface{}{
-		"Name":        fi.Name,
-		"Title":       fi.Title,
-		"Description": fi.Description,
+		"Name":          fi.Name,
+		"Title":         fi.Title,
+		"Description":   fi.Description,
 		"DataDirectory": fi.DataDirectory,
-		"Model":       fi.Model,
+		"Model":         fi.Model,
 	}
 
 	// 转换字段
@@ -298,8 +303,7 @@ func (h *Handler) FormPageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	form["Fields"] = fields
 
-	tmpl := template.Must(template.ParseFiles("ui/templates/form.html"))
-	tmpl.Execute(w, form)
+	renderTemplate(w, "form.html", form)
 }
 
 func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
@@ -317,7 +321,7 @@ func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := make(map[string]interface{})
-	
+
 	if r.Header.Get("Content-Type") == "application/json" {
 		// 解析 JSON body
 		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
@@ -397,7 +401,7 @@ func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 		if field.Required {
 			val, exists := data[field.Name]
 			fmt.Printf("  字段：%s (类型：%s), 存在：%v, 值：%v (类型：%T)\n", field.Label, field.Type, exists, val, val)
-			
+
 			// 检查是否存在且不为空
 			if !exists || val == nil {
 				fmt.Printf("    ❌ 验证失败：值不存在或为 nil\n")
@@ -409,7 +413,7 @@ func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 				})
 				return
 			}
-			
+
 			// 根据字段类型进行具体验证
 			switch field.Type {
 			case "text", "email", "tel", "url", "password", "textarea", "select", "date", "time":
@@ -465,7 +469,7 @@ func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 					// 其他类型视为单个值
 					slice = []interface{}{v}
 				}
-				
+
 				if len(slice) == 0 {
 					fmt.Printf("    ❌ 验证失败：空数组\n")
 					w.Header().Set("Content-Type", "application/json")
@@ -477,7 +481,7 @@ func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			
+
 			fmt.Printf("    ✅ 验证通过\n")
 		}
 	}
@@ -555,8 +559,7 @@ func (h *Handler) saveToDatabase(fi FormInfo, data map[string]interface{}) error
 // LoginHandler 登录页面
 func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		tmpl := template.Must(template.ParseFiles("ui/templates/login.html"))
-		tmpl.Execute(w, map[string]interface{}{
+		renderTemplate(w, "login.html", map[string]interface{}{
 			"Error": "",
 		})
 		return
@@ -596,8 +599,7 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		tmpl := template.Must(template.ParseFiles("ui/templates/login.html"))
-		tmpl.Execute(w, map[string]interface{}{
+		renderTemplate(w, "login.html", map[string]interface{}{
 			"Error": "用户名或密码错误",
 		})
 		return
@@ -620,8 +622,8 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Content-Type") == "application/json" {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  "success",
-			"message": "登录成功",
+			"status":   "success",
+			"message":  "登录成功",
 			"redirect": "/admin",
 		})
 		return
@@ -671,12 +673,12 @@ func (h *Handler) AdminHandler(w http.ResponseWriter, r *http.Request) {
 		if tableName == "" {
 			tableName = "form_" + fi.Name
 		}
-		
+
 		count, err := h.db.GetCount(tableName)
 		if err != nil {
 			count = 0 // 如果表不存在或查询失败，设置为 0
 		}
-		
+
 		formList = append(formList, map[string]interface{}{
 			"Name":        fi.Name,
 			"Title":       fi.Title,
@@ -692,8 +694,7 @@ func (h *Handler) AdminHandler(w http.ResponseWriter, r *http.Request) {
 		return formList[i]["FileModTime"].(int64) > formList[j]["FileModTime"].(int64)
 	})
 
-	tmpl := template.Must(template.ParseFiles("ui/templates/admin.html"))
-	tmpl.Execute(w, map[string]interface{}{
+	renderTemplate(w, "admin.html", map[string]interface{}{
 		"Forms": formList,
 		"User":  session,
 	})
@@ -722,13 +723,13 @@ func (h *Handler) ExportCSVHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 导出 CSV
 	outputPath := fmt.Sprintf("data/%s_%s.csv", fi.Name, time.Now().Format("20060102_150405"))
-	
+
 	// 转换字段类型
 	modelsFields := make([]models.FieldInfo, len(fi.Fields))
 	for i, f := range fi.Fields {
 		modelsFields[i] = convertToModelsField(f)
 	}
-	
+
 	if err := h.db.ExportToCSV(tableName, modelsFields, outputPath); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -742,7 +743,7 @@ func (h *Handler) ExportCSVHandler(w http.ResponseWriter, r *http.Request) {
 	// 返回下载链接或直接发送文件
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s_%s.csv\"", fi.Name, time.Now().Format("20060102_150405")))
-	
+
 	file, err := os.Open(outputPath)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")

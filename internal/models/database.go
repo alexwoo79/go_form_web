@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	_ "modernc.org/sqlite"
 )
 
 type Database struct {
@@ -19,7 +21,7 @@ func NewDatabase(dbPath, dbType string) (*Database, error) {
 		return nil, fmt.Errorf("unsupported database type: %s", dbType)
 	}
 
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +52,7 @@ func (d *Database) getTableColumns(tableName string) []string {
 		return nil
 	}
 	defer rows.Close()
-	
+
 	var columns []string
 	for rows.Next() {
 		var col string
@@ -75,20 +77,20 @@ func (d *Database) CreateTable(tableName string, fields []FieldInfo) error {
 	// 构建动态列结构
 	columns := make([]string, 0)
 	columns = append(columns, "id INTEGER PRIMARY KEY AUTOINCREMENT")
-	
+
 	// 添加 data 字段用于存储原始 JSON（备份用途）
 	columns = append(columns, "data TEXT NOT NULL")
-	
+
 	// 根据字段定义创建列
 	for _, field := range fields {
 		colType := d.getFieldType(field.Type)
 		columns = append(columns, fmt.Sprintf("`%s` %s", field.Name, colType))
 	}
-	
+
 	// 添加系统字段
 	columns = append(columns, "_submitted_at TEXT")
 	columns = append(columns, "_ip TEXT")
-	
+
 	query := fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s` (%s)", tableName, strings.Join(columns, ", "))
 	_, err := d.db.Exec(query)
 	return err
@@ -112,13 +114,13 @@ func (d *Database) UpdateTableSchema(tableName string, oldFields []FieldInfo, ne
 	if !d.TableExists(tableName) {
 		return d.CreateTable(tableName, newFields)
 	}
-	
+
 	// 获取现有列名
 	existingCols := make(map[string]bool)
 	for _, f := range oldFields {
 		existingCols[f.Name] = true
 	}
-	
+
 	// 添加新列
 	for _, field := range newFields {
 		if !existingCols[field.Name] {
@@ -132,7 +134,7 @@ func (d *Database) UpdateTableSchema(tableName string, oldFields []FieldInfo, ne
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -141,11 +143,11 @@ func (d *Database) Insert(tableName string, data map[string]interface{}) error {
 	columns := make([]string, 0)
 	values := make([]interface{}, 0)
 	placeholders := make([]string, 0)
-	
+
 	// 调试：打印插入信息
 	fmt.Printf("💾 准备插入数据到表：%s\n", tableName)
 	fmt.Printf("📦 原始数据：%v\n", data)
-	
+
 	// 首先处理 data 字段（存储原始 JSON）
 	jsonData, err := json.Marshal(data)
 	if err != nil {
@@ -154,20 +156,20 @@ func (d *Database) Insert(tableName string, data map[string]interface{}) error {
 	columns = append(columns, "data")
 	values = append(values, jsonData)
 	placeholders = append(placeholders, "?")
-	
+
 	for key, val := range data {
 		// 跳过系统字段（稍后单独处理）
 		if key == "_submitted_at" || key == "_ip" {
 			continue
 		}
-		
+
 		// 检查列是否存在
 		if !d.columnExists(tableName, key) {
 			fmt.Printf("❌ 错误：表 %s 中不存在列 %s\n", tableName, key)
 			fmt.Printf("📋 表 %s 的可用列：%v\n", tableName, d.getTableColumns(tableName))
 			return fmt.Errorf("表 %s 没有列 %s", tableName, key)
 		}
-		
+
 		// 处理数组类型（checkbox 多选）
 		if arr, ok := val.([]interface{}); ok {
 			// 将数组转换为逗号分隔的字符串
@@ -184,12 +186,12 @@ func (d *Database) Insert(tableName string, data map[string]interface{}) error {
 			// 处理字符串数组
 			val = strings.Join(arr, ",")
 		}
-		
+
 		columns = append(columns, fmt.Sprintf("`%s`", key))
 		values = append(values, val)
 		placeholders = append(placeholders, "?")
 	}
-	
+
 	// 添加系统字段
 	submittedAt := ""
 	ip := ""
@@ -199,18 +201,18 @@ func (d *Database) Insert(tableName string, data map[string]interface{}) error {
 	if v, ok := data["_ip"].(string); ok {
 		ip = v
 	}
-	
+
 	columns = append(columns, "_submitted_at", "_ip")
 	values = append(values, submittedAt, ip)
 	placeholders = append(placeholders, "?", "?")
-	
-	query := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)", 
-		tableName, 
-		strings.Join(columns, ", "), 
+
+	query := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)",
+		tableName,
+		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "))
-	
+
 	fmt.Printf("✅ 执行插入：SQL=%s\n", query)
-	
+
 	_, err = d.db.Exec(query, values...)
 	if err != nil {
 		fmt.Printf("❌ 插入失败：%v\n", err)
@@ -271,40 +273,40 @@ func (d *Database) ExportToCSV(tableName string, fields []FieldInfo, outputPath 
 	for i, f := range fields {
 		columns[i] = fmt.Sprintf("`%s`", f.Name)
 	}
-	
-	query := fmt.Sprintf("SELECT %s, _submitted_at, _ip FROM `%s` ORDER BY _submitted_at DESC", 
+
+	query := fmt.Sprintf("SELECT %s, _submitted_at, _ip FROM `%s` ORDER BY _submitted_at DESC",
 		strings.Join(columns, ", "), tableName)
-	
+
 	rows, err := d.db.Query(query)
 	if err != nil {
 		return fmt.Errorf("查询数据失败：%v", err)
 	}
 	defer rows.Close()
-	
+
 	// 创建 CSV 文件
 	file, err := os.Create(outputPath)
 	if err != nil {
 		return fmt.Errorf("创建文件失败：%v", err)
 	}
 	defer file.Close()
-	
+
 	// 写入 BOM 以支持 Excel 正确识别 UTF-8
 	file.WriteString("\xef\xbb\xbf")
-	
+
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
-	
+
 	// 写入表头（使用中文标签）
 	headers := make([]string, 0)
 	for _, f := range fields {
 		headers = append(headers, f.Label)
 	}
 	headers = append(headers, "提交时间", "IP 地址")
-	
+
 	if err := writer.Write(headers); err != nil {
 		return fmt.Errorf("写入表头失败：%v", err)
 	}
-	
+
 	// 写入数据行
 	for rows.Next() {
 		values := make([]interface{}, len(fields)+2) // 字段 + 系统字段
@@ -312,11 +314,11 @@ func (d *Database) ExportToCSV(tableName string, fields []FieldInfo, outputPath 
 		for i := range values {
 			valuePtrs[i] = &values[i]
 		}
-		
+
 		if err := rows.Scan(valuePtrs...); err != nil {
 			return fmt.Errorf("扫描行失败：%v", err)
 		}
-		
+
 		row := make([]string, len(values))
 		for i, val := range values {
 			if val == nil {
@@ -327,12 +329,12 @@ func (d *Database) ExportToCSV(tableName string, fields []FieldInfo, outputPath 
 				row[i] = fmt.Sprintf("%v", val)
 			}
 		}
-		
+
 		if err := writer.Write(row); err != nil {
 			return fmt.Errorf("写入行失败：%v", err)
 		}
 	}
-	
+
 	return rows.Err()
 }
 

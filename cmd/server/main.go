@@ -2,13 +2,29 @@ package main
 
 import (
 	"flag"
-	_ "github.com/mattn/go-sqlite3"
 	"go-web/internal/config"
 	"go-web/internal/handler"
 	"go-web/internal/models"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 )
+
+func ensureRuntimeDirs(dbPath string) error {
+	if err := os.MkdirAll("data", 0755); err != nil {
+		return err
+	}
+
+	dbDir := filepath.Dir(dbPath)
+	if dbDir != "." && dbDir != "" {
+		if err := os.MkdirAll(dbDir, 0755); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "配置文件路径")
@@ -19,6 +35,10 @@ func main() {
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
+	}
+
+	if err := ensureRuntimeDirs(cfg.Database.Path); err != nil {
+		log.Fatalf("创建运行目录失败: %v", err)
 	}
 
 	// 初始化数据库
@@ -54,13 +74,13 @@ func main() {
 			Fields:        fields,
 			FileModTime:   fc.FileModTime, // 传递配置文件修改时间
 		})
-		
+
 		// 动态创建或更新数据库表结构
 		tableName := fc.Model.TableName
 		if tableName == "" {
 			tableName = "form_" + fc.Name
 		}
-		
+
 		// 转换为 models.FieldInfo
 		modelsFields := make([]models.FieldInfo, len(fields))
 		for i, f := range fields {
@@ -75,7 +95,7 @@ func main() {
 				Max:         f.Max,
 			}
 		}
-		
+
 		if db.TableExists(tableName) {
 			// 表已存在，尝试更新结构（添加新列）
 			log.Printf("检测到表 %s 已存在，检查是否需要更新结构...", tableName)
