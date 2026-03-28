@@ -1,0 +1,162 @@
+# Go Web 表单系统配置示例
+
+## 服务器配置
+server:
+  port: 8080
+  host: "localhost"
+
+## 数据库配置
+database:
+  path: "data/data.db"
+  type: "sqlite"
+
+## 表单定义
+forms:
+  # 用户注册表单
+  - name: "user_registration"
+    title: "用户注册表单"
+    description: "欢迎注册我们的服务，请填写以下信息"
+    model:
+      table_name: "user_registration"
+    fields:
+      - name: "username"
+        label: "用户名"
+        type: "text"
+        placeholder: "请输入用户名"
+        required: true
+      - name: "email"
+        label: "邮箱"
+        type: "email"
+        placeholder: "请输入邮箱地址"
+        required: true
+      - name: "password"
+        label: "密码"
+        type: "password"
+        placeholder: "请输入密码"
+        required: true
+      - name: "phone"
+        label: "手机号"
+        type: "tel"
+        placeholder: "请输入手机号"
+        required: false
+      - name: "age"
+        label: "年龄"
+        type: "number"
+        placeholder: "请输入年龄"
+        required: false
+        min: 1
+        max: 150
+      - name: "gender"
+        label: "性别"
+        type: "select"
+        options:
+          - "男"
+          - "女"
+          - "其他"
+        required: false
+      - name: "hobbies"
+        label: "兴趣爱好"
+        type: "checkbox"
+        options:
+          - "阅读"
+          - "旅行"
+          - "运动"
+          - "音乐"
+          - "电影"
+        required: false
+      - name: "bio"
+        label: "个人简介"
+        type: "textarea"
+        placeholder: "请简单的介绍一下自己..."
+        required: false
+
+  # 产品反馈表单
+  - name: "product_feedback"
+    title: "产品反馈表单"
+    description: "感谢您的反馈，帮助我们改进产品"
+    model:
+      table_name: "product_feedback"
+    fields:
+      - name: "name"
+        label: "姓名"
+        type: "text"
+        placeholder: "请输入您的姓名"
+        required: true
+      - name: "email"
+        label: "邮箱"
+        type: "email"
+        placeholder: "请输入邮箱"
+        required: true
+      - name: "product_name"
+        label: "产品名称"
+        type: "select"
+        options:
+          - "产品 A"
+          - "产品 B"
+          - "产品 C"
+        required: true
+      - name: "satisfaction"
+        label: "满意度"
+        type: "radio"
+        options:
+          - "非常满意"
+          - "满意"
+          - "一般"
+          - "不满意"
+        required: true
+      - name: " suggestions"
+        label: "改进建议"
+        type: "textarea"
+        placeholder: "请留下您的宝贵建议..."
+        required: false
+      - name: "rating"
+        label: "评分"
+        type: "number"
+        placeholder: "1-10"
+        required: true
+        min: 1
+        max: 10
+
+  # 活动报名表单
+  - name: "event_registration"
+    title: "活动报名表单"
+    description: "参加我们的线下活动，请填写报名信息"
+    data_directory: "data/event_registration"
+    model:
+      table_name: "event_registration"
+    fields:
+      - name: "name"
+        label: "姓名"
+        type: "text"
+        placeholder: "请输入姓名"
+        required: true
+      - name: "email"
+        label: "邮箱"
+        type: "email"
+        placeholder: "请输入邮箱"
+        required: true
+      - name: "phone"
+        label: "手机号"
+        type: "tel"
+        placeholder: "请输入手机号"
+        required: true
+      - name: "event_name"
+        label: "活动名称"
+        type: "select"
+        options:
+          - "技术分享会"
+          - "产品发布会"
+          - "用户交流会"
+        required: true
+      - name: "attendees_count"
+        label: "参与人数"
+        type: "number"
+        placeholder: "包括自己在内的人数"
+        required: true
+        min: 1
+        max: 10
+      - name: "special_requirements"
+        label: "特殊需求"
+        type: "textarea"
+        placeholder: "如有特殊需求请说明..."
+        required: false
