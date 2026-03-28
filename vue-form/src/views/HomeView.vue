@@ -57,6 +57,36 @@ function formatDeadline(raw?: string): string {
   const datePart = value.split(' ')[0]
   return datePart ?? value
 }
+
+function isExpiringToday(raw?: string): boolean {
+  const value = (raw ?? '').trim()
+  if (!value) return false
+
+  let expireDate: Date
+
+  // RFC3339 场景
+  if (value.includes('T')) {
+    const d = new Date(value)
+    if (!Number.isNaN(d.getTime())) {
+      expireDate = d
+    } else {
+      return false
+    }
+  } else {
+    // 解析 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS
+    const datePart = (value.split(' ')[0] ?? '')
+    const [y, m, d] = datePart.split('-').map(Number)
+    if (!y || !m || !d) return false
+    expireDate = new Date(y, m - 1, d, 23, 59, 59)
+  }
+
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const tomorrow = new Date(today.getTime() + 86400000)
+
+  // 到期日 <= 明天，就认为"还有一天"
+  return expireDate <= tomorrow
+}
 </script>
 
 <template>
@@ -94,7 +124,9 @@ function formatDeadline(raw?: string): string {
           <span class="card-kicker">在线表单</span>
           <h2 class="card-title">{{ form.Title }}</h2>
           <p class="card-desc">{{ form.Description }}</p>
-          <p class="card-deadline">填写截止：{{ formatDeadline(form.ExpireAt) }}</p>
+          <p :class="{ 'card-deadline': true, 'deadline-urgent': isExpiringToday(form.ExpireAt) }">
+            填写截止：{{ formatDeadline(form.ExpireAt) }}
+          </p>
           <div class="card-actions">
             <span class="btn">
               <span>填写</span>
@@ -239,6 +271,12 @@ function formatDeadline(raw?: string): string {
   border-radius: 999px;
   align-self: flex-start;
   padding: .18rem .55rem;
+}
+
+.deadline-urgent {
+  color: #dc2626;
+  background: #fee2e2;
+  border-color: #fecaca;
 }
 
 .card-actions {

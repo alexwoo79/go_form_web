@@ -81,6 +81,7 @@ forms:
   - name: "event_registration"
     title: "活动报名表单"
     description: "报名参加我们的技术沙龙活动"
+    expire_at: "2026-03-28 23:59:59"
     model:
       table_name: "event_registration"
     fields:
