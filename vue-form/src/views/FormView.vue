@@ -33,7 +33,13 @@ const submitError = ref('')
 onMounted(async () => {
   try {
     const res = await fetch(`/api/forms/${route.params.formName}`)
-    if (!res.ok) throw new Error('表单不存在')
+    if (!res.ok) {
+      if (res.status === 410) {
+        const data = await res.json()
+        throw new Error(data.error || '该表单已到期，停止收集')
+      }
+      throw new Error('表单不存在')
+    }
     formDef.value = await res.json()
     // 初始化表单数据
     for (const f of formDef.value!.Fields) {
@@ -66,6 +72,10 @@ async function submit() {
       submitted.value = true
     } else {
       const data = await res.json()
+      if (res.status === 410) {
+        submitError.value = data.error || '该表单已到期，停止收集'
+        return
+      }
       if (res.status === 401) {
         submitError.value = data.error || '请先登录'
         setTimeout(() => router.push('/login'), 700)

@@ -2,9 +2,11 @@ package config
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -28,6 +30,7 @@ type FormConfig struct {
 	Name          string       `yaml:"name"`
 	Title         string       `yaml:"title"`
 	Description   string       `yaml:"description"`
+	ExpireAt      string       `yaml:"expire_at,omitempty"` // 支持 RFC3339、2006-01-02 15:04:05、2006-01-02
 	Fields        []*FormField `yaml:"fields"`
 	DataDirectory string       `yaml:"data_directory"`
 	Model         *FormModel   `yaml:"model"`
@@ -67,7 +70,13 @@ func Load(mainPath string) (*Config, error) {
 	// 3. 获取主配置所在目录，用于解析相对路径
 	baseDir := filepath.Dir(mainPath)
 
-	// 4. 遍历所有 include 配置
+	// 4. 建立已存在表单索引（主配置优先）
+	existingForms := make(map[string]struct{}, len(mainConfig.Forms))
+	for _, f := range mainConfig.Forms {
+		existingForms[f.Name] = struct{}{}
+	}
+
+	// 5. 遍历所有 include 配置
 	allForms := mainConfig.Forms
 	for _, includePattern := range mainConfig.Includes {
 		// 支持通配符匹配
@@ -82,20 +91,31 @@ func Load(mainPath string) (*Config, error) {
 				continue
 			}
 
+			// 跳过示例配置，避免覆盖真实配置
+			if strings.HasSuffix(filepath.Base(match), ".example.yaml") {
+				continue
+			}
+
 			includeConfig, err := loadSingleConfig(match)
 			if err != nil {
 				fmt.Printf("警告：加载配置文件 %s 失败：%v\n", match, err)
 				continue
 			}
 
-			// 标记配置来源
+			// 标记来源并做去重（主配置优先，同名忽略）
+			addedCount := 0
 			for _, form := range includeConfig.Forms {
+				if _, exists := existingForms[form.Name]; exists {
+					fmt.Printf("⚠️ 跳过重复表单：%s（来源：%s）\n", form.Name, filepath.Base(match))
+					continue
+				}
 				form.ConfigSource = filepath.Base(match)
+				allForms = append(allForms, form)
+				existingForms[form.Name] = struct{}{}
+				addedCount++
 			}
 
-			// 合并表单列表
-			allForms = append(allForms, includeConfig.Forms...)
-			fmt.Printf("✅ 已加载配置文件：%s (%d 个表单)\n", match, len(includeConfig.Forms))
+			fmt.Printf("✅ 已加载配置文件：%s (新增 %d 个表单)\n", match, addedCount)
 		}
 	}
 

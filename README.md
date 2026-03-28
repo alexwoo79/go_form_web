@@ -101,6 +101,14 @@ go-web/
 go build -o bin/go-web ./cmd/server
 ```
 
+或使用一体化脚本（包含前端构建并支持 Windows 目标）：
+
+```bash
+./build.sh              # 构建本机版本
+./build.sh windows      # 构建 Windows 版本（bin/go-web.exe）
+./build.sh all          # 同时构建本机 + Windows
+```
+
 ### 运行测试
 
 ```bash

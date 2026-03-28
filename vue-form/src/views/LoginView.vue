@@ -25,7 +25,7 @@ async function login() {
       if (auth.user?.role === 'admin') {
         router.push('/admin')
       } else {
-        router.push('/')
+        router.push('/my-submissions')
       }
     } else {
       const data = await res.json()

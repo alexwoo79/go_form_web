@@ -7,6 +7,7 @@ interface FormItem {
   Name: string
   Title: string
   Description: string
+  ExpireAt?: string
 }
 
 const forms = ref<FormItem[]>([])
@@ -35,6 +36,26 @@ async function logout() {
   await fetch('/api/logout', { method: 'POST' })
   auth.setUser(null)
   router.push('/login')
+}
+
+function formatDeadline(raw?: string): string {
+  const value = (raw ?? '').trim()
+  if (!value) return '长期有效'
+
+  // RFC3339 场景：2026-12-31T23:59:59+08:00
+  if (value.includes('T')) {
+    const d = new Date(value)
+    if (!Number.isNaN(d.getTime())) {
+      const y = d.getFullYear()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      return `${y}-${m}-${day}`
+    }
+  }
+
+  // 兼容 2026-12-31 23:59:59 / 2026-12-31
+  const datePart = value.split(' ')[0]
+  return datePart ?? value
 }
 </script>
 
@@ -73,6 +94,7 @@ async function logout() {
           <span class="card-kicker">在线表单</span>
           <h2 class="card-title">{{ form.Title }}</h2>
           <p class="card-desc">{{ form.Description }}</p>
+          <p class="card-deadline">填写截止：{{ formatDeadline(form.ExpireAt) }}</p>
           <div class="card-actions">
             <span class="btn">
               <span>填写</span>
@@ -206,6 +228,17 @@ async function logout() {
   -webkit-box-orient: vertical;
   overflow: hidden;
   min-height: 3.1em;
+}
+
+.card-deadline {
+  margin: .55rem 0 0;
+  font-size: .8rem;
+  color: #5f6c89;
+  background: #f5f8ff;
+  border: 1px solid #e2e9f8;
+  border-radius: 999px;
+  align-self: flex-start;
+  padding: .18rem .55rem;
 }
 
 .card-actions {

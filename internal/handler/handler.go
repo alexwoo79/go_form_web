@@ -118,6 +118,7 @@ type FormInfo struct {
 	Name          string
 	Title         string
 	Description   string
+	ExpireAt      string // 表单到期时间，支持 RFC3339、2006-01-02 15:04:05、2006-01-02
 	DataDirectory string
 	Model         struct {
 		TableName string
@@ -259,6 +260,42 @@ func convertToModelsField(fi FieldInfo) models.FieldInfo {
 	}
 }
 
+func parseExpireAt(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+
+	for _, layout := range layouts {
+		if t, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			return t, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("invalid expire_at format: %s", raw)
+}
+
+func (h *Handler) isFormExpired(fi FormInfo) bool {
+	if strings.TrimSpace(fi.ExpireAt) == "" {
+		return false
+	}
+
+	expireAt, err := parseExpireAt(fi.ExpireAt)
+	if err != nil {
+		// 配置格式错误时不阻塞服务，仅忽略过期判断。
+		fmt.Printf("⚠️ 表单 %s 的 expire_at 配置无效：%v\n", fi.Name, err)
+		return false
+	}
+
+	return time.Now().After(expireAt)
+}
+
 // MeHandler 返回当前登录用户信息，未登录返回 401
 func (h *Handler) MeHandler(w http.ResponseWriter, r *http.Request) {
 	session := h.getCurrentUser(r)
@@ -281,10 +318,14 @@ func (h *Handler) IndexHandler(w http.ResponseWriter, r *http.Request) {
 
 	formList := make([]map[string]interface{}, 0, len(h.formMap))
 	for _, fi := range h.formMap {
+		if h.isFormExpired(fi) {
+			continue
+		}
 		formList = append(formList, map[string]interface{}{
 			"Name":        fi.Name,
 			"Title":       fi.Title,
 			"Description": fi.Description,
+			"ExpireAt":    fi.ExpireAt,
 		})
 	}
 
@@ -295,10 +336,14 @@ func (h *Handler) IndexHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) FormListHandler(w http.ResponseWriter, r *http.Request) {
 	formList := make([]map[string]interface{}, 0, len(h.formMap))
 	for _, fi := range h.formMap {
+		if h.isFormExpired(fi) {
+			continue
+		}
 		formList = append(formList, map[string]interface{}{
 			"Name":        fi.Name,
 			"Title":       fi.Title,
 			"Description": fi.Description,
+			"ExpireAt":    fi.ExpireAt,
 		})
 	}
 
@@ -311,6 +356,10 @@ func (h *Handler) FormPageHandler(w http.ResponseWriter, r *http.Request) {
 	fi, exists := h.formMap[formName]
 	if !exists {
 		http.NotFound(w, r)
+		return
+	}
+	if h.isFormExpired(fi) {
+		jsonResponse(w, http.StatusGone, map[string]string{"error": "该表单已到期，停止收集"})
 		return
 	}
 
@@ -347,6 +396,10 @@ func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 	fi, exists := h.formMap[formName]
 	if !exists {
 		http.NotFound(w, r)
+		return
+	}
+	if h.isFormExpired(fi) {
+		jsonResponse(w, http.StatusGone, map[string]string{"error": "该表单已到期，停止收集"})
 		return
 	}
 

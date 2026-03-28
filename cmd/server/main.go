@@ -69,6 +69,7 @@ func main() {
 			Name:          fc.Name,
 			Title:         fc.Title,
 			Description:   fc.Description,
+			ExpireAt:      fc.ExpireAt,
 			DataDirectory: "", // 已废弃，数据直接写入数据库
 			Model:         struct{ TableName string }{TableName: fc.Model.TableName},
 			Fields:        fields,

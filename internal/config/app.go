@@ -46,6 +46,7 @@ func NewApp(configPath string) (*App, error) {
 			Name:          fc.Name,
 			Title:         fc.Title,
 			Description:   fc.Description,
+			ExpireAt:      fc.ExpireAt,
 			DataDirectory: fc.DataDirectory,
 			Model:         struct{ TableName string }{TableName: fc.Model.TableName},
 			Fields:        fields,
