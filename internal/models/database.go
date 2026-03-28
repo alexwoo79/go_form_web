@@ -15,6 +15,14 @@ type Database struct {
 	db *sql.DB
 }
 
+type UserRecord struct {
+	ID           int
+	Username     string
+	PasswordHash string
+	Role         string
+	CreatedAt    string
+}
+
 func NewDatabase(dbPath, dbType string) (*Database, error) {
 	// Ensure dbType is "sqlite"
 	if dbType != "sqlite" && dbType != "sqlite3" {
@@ -88,6 +96,7 @@ func (d *Database) CreateTable(tableName string, fields []FieldInfo) error {
 	}
 
 	// 添加系统字段
+	columns = append(columns, "owner_user_id INTEGER")
 	columns = append(columns, "_submitted_at TEXT")
 	columns = append(columns, "_ip TEXT")
 
@@ -96,10 +105,30 @@ func (d *Database) CreateTable(tableName string, fields []FieldInfo) error {
 	return err
 }
 
+func (d *Database) ensureFormSystemColumns(tableName string) error {
+	systemCols := map[string]string{
+		"owner_user_id": "INTEGER",
+		"_submitted_at": "TEXT",
+		"_ip":           "TEXT",
+	}
+
+	for col, typ := range systemCols {
+		if d.columnExists(tableName, col) {
+			continue
+		}
+		query := fmt.Sprintf("ALTER TABLE `%s` ADD COLUMN `%s` %s", tableName, col, typ)
+		if _, err := d.db.Exec(query); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("添加系统列 %s 失败：%v", col, err)
+		}
+	}
+
+	return nil
+}
+
 // getFieldType 根据表单字段类型返回数据库字段类型
 func (d *Database) getFieldType(formFieldType string) string {
 	switch formFieldType {
-	case "number":
+	case "number", "range":
 		return "REAL"
 	case "date", "time":
 		return "TEXT" // SQLite 没有专门的日期类型
@@ -135,6 +164,10 @@ func (d *Database) UpdateTableSchema(tableName string, oldFields []FieldInfo, ne
 		}
 	}
 
+	if err := d.ensureFormSystemColumns(tableName); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -159,7 +192,7 @@ func (d *Database) Insert(tableName string, data map[string]interface{}) error {
 
 	for key, val := range data {
 		// 跳过系统字段（稍后单独处理）
-		if key == "_submitted_at" || key == "_ip" {
+		if key == "owner_user_id" || key == "_submitted_at" || key == "_ip" {
 			continue
 		}
 
@@ -193,6 +226,12 @@ func (d *Database) Insert(tableName string, data map[string]interface{}) error {
 	}
 
 	// 添加系统字段
+	ownerUserID := 0
+	if v, ok := data["owner_user_id"].(float64); ok {
+		ownerUserID = int(v)
+	} else if v, ok := data["owner_user_id"].(int); ok {
+		ownerUserID = v
+	}
 	submittedAt := ""
 	ip := ""
 	if v, ok := data["_submitted_at"].(string); ok {
@@ -202,9 +241,9 @@ func (d *Database) Insert(tableName string, data map[string]interface{}) error {
 		ip = v
 	}
 
-	columns = append(columns, "_submitted_at", "_ip")
-	values = append(values, submittedAt, ip)
-	placeholders = append(placeholders, "?", "?")
+	columns = append(columns, "owner_user_id", "_submitted_at", "_ip")
+	values = append(values, ownerUserID, submittedAt, ip)
+	placeholders = append(placeholders, "?", "?", "?")
 
 	query := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)",
 		tableName,
@@ -218,6 +257,91 @@ func (d *Database) Insert(tableName string, data map[string]interface{}) error {
 		fmt.Printf("❌ 插入失败：%v\n", err)
 	}
 	return err
+}
+
+func (d *Database) EnsureUserTable() error {
+	query := `CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT NOT NULL UNIQUE,
+		password_hash TEXT NOT NULL,
+		role TEXT NOT NULL DEFAULT 'user',
+		created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`
+	_, err := d.db.Exec(query)
+	return err
+}
+
+func (d *Database) CreateUser(username, passwordHash, role string) (int64, error) {
+	query := `INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, datetime('now'))`
+	res, err := d.db.Exec(query, username, passwordHash, role)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (d *Database) GetUserByUsername(username string) (*UserRecord, error) {
+	query := `SELECT id, username, password_hash, role, created_at FROM users WHERE username = ? LIMIT 1`
+	var u UserRecord
+	err := d.db.QueryRow(query, username).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (d *Database) GetUserByID(id int) (*UserRecord, error) {
+	query := `SELECT id, username, password_hash, role, created_at FROM users WHERE id = ? LIMIT 1`
+	var u UserRecord
+	err := d.db.QueryRow(query, id).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (d *Database) CountUsers() (int64, error) {
+	query := `SELECT COUNT(*) FROM users`
+	var count int64
+	err := d.db.QueryRow(query).Scan(&count)
+	return count, err
+}
+
+func (d *Database) UpdateUserRole(userID int, role string) error {
+	query := `UPDATE users SET role = ? WHERE id = ?`
+	_, err := d.db.Exec(query, role, userID)
+	return err
+}
+
+func (d *Database) UpdateUserPassword(userID int, passwordHash string) error {
+	query := `UPDATE users SET password_hash = ? WHERE id = ?`
+	_, err := d.db.Exec(query, passwordHash, userID)
+	return err
+}
+
+func (d *Database) ListUsers() ([]UserRecord, error) {
+	rows, err := d.db.Query(`SELECT id, username, password_hash, role, created_at FROM users ORDER BY id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	users := make([]UserRecord, 0)
+	for rows.Next() {
+		var u UserRecord
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+
+	return users, rows.Err()
 }
 
 func (d *Database) Query(tableName string, where string, args ...interface{}) ([]map[string]interface{}, error) {

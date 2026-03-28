@@ -1,0 +1,90 @@
+:root {
+  --bg-base: #f4f6fb;
+  --bg-elevated: #ffffff;
+  --bg-soft-blue: #edf2ff;
+  --bg-soft-green: #ecf7f0;
+  --bg-soft-amber: #fff6e8;
+  --bg-soft-violet: #f2efff;
+  --bg-glow-a: #edf2ff;
+  --bg-glow-b: #edf8f2;
+  --bg-glow-c: #f5f1ff;
+  --text-900: #1f2937;
+  --text-700: #374151;
+  --text-500: #6b7280;
+  --text-muted: #8a92a6;
+  --border-200: #e5e7eb;
+  --brand-600: #5267db;
+  --brand-700: #4354bd;
+
+  --surface-header: rgba(255, 255, 255, .76);
+  --surface-header-border: rgba(205, 212, 228, .78);
+  --surface-card-start: #ffffff;
+  --surface-card-end: #fbfcff;
+  --surface-card-border: #e7ebf3;
+  --shadow-soft: 0 9px 20px rgba(77, 95, 164, .07);
+
+  --admin-header-start: #27335e;
+  --admin-header-end: #2a2d5d;
+  --admin-header-text: #ffffff;
+
+  --status-success: #2f9f63;
+  --status-danger: #e53e3e;
+  --focus-ring: rgba(75, 104, 242, .16);
+}
+
+:root[data-theme='vivid'] {
+  --bg-base: #f5f8ff;
+  --bg-soft-blue: #e4edff;
+  --bg-soft-green: #e1faef;
+  --bg-soft-amber: #fff2d6;
+  --bg-soft-violet: #ece5ff;
+  --bg-glow-a: #dfe9ff;
+  --bg-glow-b: #ddfaed;
+  --bg-glow-c: #ece5ff;
+
+  --brand-600: #5c70ff;
+  --brand-700: #4b5ee6;
+
+  --surface-header: rgba(247, 250, 255, .84);
+  --surface-header-border: rgba(191, 203, 234, .86);
+  --surface-card-end: #f7faff;
+  --surface-card-border: #d8e2f6;
+  --shadow-soft: 0 14px 30px rgba(67, 95, 196, .16);
+
+  --admin-header-start: #2e4180;
+  --admin-header-end: #303a78;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+html,
+body {
+  width: 100%;
+  min-height: 100vh;
+}
+
+body {
+  color: var(--text-900);
+  background:
+    radial-gradient(circle at 8% 8%, var(--bg-glow-a) 0%, transparent 40%),
+    radial-gradient(circle at 88% 10%, var(--bg-glow-b) 0%, transparent 37%),
+    radial-gradient(circle at 50% 100%, var(--bg-glow-c) 0%, transparent 34%),
+    var(--bg-base);
+  line-height: 1.6;
+  font-family:
+    'Avenir Next',
+    'PingFang SC',
+    'Hiragino Sans GB',
+    'Noto Sans SC',
+    'Microsoft YaHei',
+    sans-serif;
+  font-size: 15px;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

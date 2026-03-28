@@ -12,3 +12,8 @@ var Templates embed.FS
 //
 //go:embed all:static
 var Static embed.FS
+
+// Frontend embeds built Vue SPA assets copied to ui/frontend during build.
+//
+//go:embed all:frontend
+var Frontend embed.FS

@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-web/internal/models"
-	"go-web/ui"
-	"html/template"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -18,11 +16,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gorilla/mux"
 )
 
-func renderTemplate(w http.ResponseWriter, name string, data interface{}) {
-	tmpl := template.Must(template.ParseFS(ui.Templates, "templates/"+name))
-	tmpl.Execute(w, data)
+// JSON 响应工具函数
+func jsonResponse(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
 }
 
 // User 用户模型
@@ -110,7 +112,6 @@ type Handler struct {
 	db         *models.Database
 	formMap    map[string]FormInfo
 	sessionMgr *SessionManager
-	adminUsers map[string]string // username -> password hash
 }
 
 type FormInfo struct {
@@ -146,12 +147,22 @@ func New(db *models.Database, formConfigs []FormInfo) *Handler {
 		db:         db,
 		formMap:    formMap,
 		sessionMgr: NewSessionManager(),
-		adminUsers: make(map[string]string),
 	}
 
-	// 初始化默认管理员账户 (admin/admin123)
-	defaultPassword := hashPassword("admin123")
-	h.adminUsers["admin"] = defaultPassword
+	if err := h.db.EnsureUserTable(); err != nil {
+		panic("初始化用户表失败: " + err.Error())
+	}
+
+	adminUser, err := h.db.GetUserByUsername("admin")
+	if err != nil {
+		panic("检查默认管理员失败: " + err.Error())
+	}
+	if adminUser == nil {
+		defaultPassword := hashPassword("admin123")
+		if _, err := h.db.CreateUser("admin", defaultPassword, "admin"); err != nil {
+			panic("创建默认管理员失败: " + err.Error())
+		}
+	}
 
 	// 定期清理过期会话（每 10 分钟）
 	go func() {
@@ -176,18 +187,36 @@ func verifyPassword(password, hash string) bool {
 	return hashPassword(password) == hash
 }
 
-// RequireAdmin 检查用户是否已登录且为管理员（中间件）
+// RequireAdmin 检查用户是否已登录且为管理员（中间件），未授权返回 401 JSON
 func (h *Handler) RequireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("session_id")
 		if err != nil {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 			return
 		}
 
 		session := h.sessionMgr.GetSession(cookie.Value)
 		if session == nil || session.Role != "admin" {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "权限不足"})
+			return
+		}
+
+		next(w, r)
+	}
+}
+
+func (h *Handler) RequireLogin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("session_id")
+		if err != nil {
+			jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+			return
+		}
+
+		session := h.sessionMgr.GetSession(cookie.Value)
+		if session == nil {
+			jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "会话已失效"})
 			return
 		}
 
@@ -230,6 +259,20 @@ func convertToModelsField(fi FieldInfo) models.FieldInfo {
 	}
 }
 
+// MeHandler 返回当前登录用户信息，未登录返回 401
+func (h *Handler) MeHandler(w http.ResponseWriter, r *http.Request) {
+	session := h.getCurrentUser(r)
+	if session == nil {
+		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+		return
+	}
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"id":       session.UserID,
+		"username": session.Username,
+		"role":     session.Role,
+	})
+}
+
 func (h *Handler) IndexHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -245,10 +288,8 @@ func (h *Handler) IndexHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	renderTemplate(w, "index.html", map[string]interface{}{
-		"Forms":    formList,
-		"LoggedIn": h.isLoggedIn(r),
-	})
+	// JSON 响应
+	jsonResponse(w, http.StatusOK, formList)
 }
 
 func (h *Handler) FormListHandler(w http.ResponseWriter, r *http.Request) {
@@ -266,13 +307,7 @@ func (h *Handler) FormListHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) FormPageHandler(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
-	parts := strings.Split(strings.TrimPrefix(path, "/forms/"), "/")
-	if len(parts) < 1 {
-		http.NotFound(w, r)
-		return
-	}
-	formName := parts[0]
+	formName := mux.Vars(r)["formName"]
 	fi, exists := h.formMap[formName]
 	if !exists {
 		http.NotFound(w, r)
@@ -303,20 +338,21 @@ func (h *Handler) FormPageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	form["Fields"] = fields
 
-	renderTemplate(w, "form.html", form)
+	// JSON 响应
+	jsonResponse(w, http.StatusOK, form)
 }
 
 func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
-	parts := strings.Split(strings.TrimPrefix(path, "/api/submit/"), "/")
-	if len(parts) < 1 {
-		http.NotFound(w, r)
-		return
-	}
-	formName := parts[0]
+	formName := mux.Vars(r)["formName"]
 	fi, exists := h.formMap[formName]
 	if !exists {
 		http.NotFound(w, r)
+		return
+	}
+
+	session := h.getCurrentUser(r)
+	if session == nil {
+		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "请先登录后再提交"})
 		return
 	}
 
@@ -365,7 +401,7 @@ func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			switch field.Type {
 			case "text", "email", "tel", "url", "password":
 				data[field.Name] = values[0]
-			case "number":
+			case "number", "range":
 				val, err := strconv.ParseFloat(values[0], 64)
 				if err != nil {
 					w.Header().Set("Content-Type", "application/json")
@@ -440,7 +476,7 @@ func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 					})
 					return
 				}
-			case "number":
+			case "number", "range":
 				// 数字类型检查是否为 0 或空
 				if num, ok := val.(float64); ok {
 					// 注意：0 是有效值，只有 NaN 才无效
@@ -488,6 +524,7 @@ func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 
 	data["_submitted_at"] = time.Now().Format("2006-01-02 15:04:05")
 	data["_ip"] = getClientIP(r)
+	data["owner_user_id"] = session.UserID
 
 	// 只保存到数据库，不再保存 JSON 文件
 	// if err := h.saveToFile(fi, data); err != nil {
@@ -556,79 +593,107 @@ func (h *Handler) saveToDatabase(fi FormInfo, data map[string]interface{}) error
 	return h.db.Insert(tableName, data)
 }
 
-// LoginHandler 登录页面
-func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		renderTemplate(w, "login.html", map[string]interface{}{
-			"Error": "",
-		})
-		return
-	}
-
-	// POST 请求处理登录逻辑
-	var loginData struct {
+// RegisterHandler 用户注册
+func (h *Handler) RegisterHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 
-	if r.Header.Get("Content-Type") == "application/json" {
-		if err := json.NewDecoder(r.Body).Decode(&loginData); err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":  "error",
-				"message": "JSON 解析失败：" + err.Error(),
-			})
-			return
-		}
-	} else {
-		r.ParseForm()
-		loginData.Username = r.FormValue("username")
-		loginData.Password = r.FormValue("password")
-	}
-
-	// 验证用户名和密码
-	hashedPassword, exists := h.adminUsers[loginData.Username]
-	if !exists || !verifyPassword(loginData.Password, hashedPassword) {
-		if r.Header.Get("Content-Type") == "application/json" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":  "error",
-				"message": "用户名或密码错误",
-			})
-			return
-		}
-		renderTemplate(w, "login.html", map[string]interface{}{
-			"Error": "用户名或密码错误",
-		})
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
 		return
 	}
 
-	// 创建会话
-	sessionID := h.sessionMgr.CreateSession(loginData.Username, 1, "admin")
+	req.Username = strings.TrimSpace(req.Username)
+	if len(req.Username) < 3 || len(req.Username) > 32 {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "用户名长度需为 3-32"})
+		return
+	}
+	if len(req.Password) < 6 {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "密码至少 6 位"})
+		return
+	}
 
-	// 设置 cookie
+	user, err := h.db.GetUserByUsername(req.Username)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "查询用户失败"})
+		return
+	}
+	if user != nil {
+		jsonResponse(w, http.StatusConflict, map[string]string{"error": "用户名已存在"})
+		return
+	}
+
+	passwordHash := hashPassword(req.Password)
+	uid, err := h.db.CreateUser(req.Username, passwordHash, "user")
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "创建用户失败"})
+		return
+	}
+
+	sessionID := h.sessionMgr.CreateSession(req.Username, int(uid), "user")
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session_id",
 		Value:    sessionID,
 		Path:     "/",
-		MaxAge:   86400, // 24 小时
+		MaxAge:   86400,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	// 重定向到管理后台
-	if r.Header.Get("Content-Type") == "application/json" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":   "success",
-			"message":  "登录成功",
-			"redirect": "/admin",
-		})
+	jsonResponse(w, http.StatusCreated, map[string]interface{}{
+		"status": "success",
+		"user": map[string]interface{}{
+			"id":       int(uid),
+			"username": req.Username,
+			"role":     "user",
+		},
+	})
+}
+
+// LoginHandler 用户登录
+func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
+	// 仅接受 POST + JSON
+	var loginData struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&loginData); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
 		return
 	}
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+
+	user, err := h.db.GetUserByUsername(strings.TrimSpace(loginData.Username))
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "查询用户失败"})
+		return
+	}
+
+	if user == nil || !verifyPassword(loginData.Password, user.PasswordHash) {
+		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码错误"})
+		return
+	}
+
+	// 创建会话并设置 cookie
+	sessionID := h.sessionMgr.CreateSession(user.Username, user.ID, user.Role)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_id",
+		Value:    sessionID,
+		Path:     "/",
+		MaxAge:   86400,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"status": "success",
+		"user": map[string]interface{}{
+			"id":       user.ID,
+			"username": user.Username,
+			"role":     user.Role,
+		},
+	})
 }
 
 // LogoutHandler 登出
@@ -648,23 +713,12 @@ func (h *Handler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	jsonResponse(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 
 // AdminHandler 管理后台首页（需要管理员权限）
 func (h *Handler) AdminHandler(w http.ResponseWriter, r *http.Request) {
-	// 检查登录状态
 	session := h.getCurrentUser(r)
-	if session == nil {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-
-	// 检查是否为管理员
-	if session.Role != "admin" {
-		http.Error(w, "无权访问", http.StatusForbidden)
-		return
-	}
 
 	formList := make([]map[string]interface{}, 0, len(h.formMap))
 	for _, fi := range h.formMap {
@@ -694,21 +748,16 @@ func (h *Handler) AdminHandler(w http.ResponseWriter, r *http.Request) {
 		return formList[i]["FileModTime"].(int64) > formList[j]["FileModTime"].(int64)
 	})
 
-	renderTemplate(w, "admin.html", map[string]interface{}{
-		"Forms": formList,
-		"User":  session,
+	// JSON 响应
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"forms": formList,
+		"user":  session,
 	})
 }
 
 // ExportCSVHandler 导出 CSV 文件
 func (h *Handler) ExportCSVHandler(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
-	parts := strings.Split(strings.TrimPrefix(path, "/api/export/"), "/")
-	if len(parts) < 1 {
-		http.NotFound(w, r)
-		return
-	}
-	formName := parts[0]
+	formName := mux.Vars(r)["formName"]
 	fi, exists := h.formMap[formName]
 	if !exists {
 		http.NotFound(w, r)
@@ -761,13 +810,7 @@ func (h *Handler) ExportCSVHandler(w http.ResponseWriter, r *http.Request) {
 
 // ViewDataHandler 查看表单数据（JSON 格式）
 func (h *Handler) ViewDataHandler(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
-	parts := strings.Split(strings.TrimPrefix(path, "/api/data/"), "/")
-	if len(parts) < 1 {
-		http.NotFound(w, r)
-		return
-	}
-	formName := parts[0]
+	formName := mux.Vars(r)["formName"]
 	fi, exists := h.formMap[formName]
 	if !exists {
 		http.NotFound(w, r)
@@ -802,6 +845,225 @@ func (h *Handler) ViewDataHandler(w http.ResponseWriter, r *http.Request) {
 		"data":   data,
 		"fields": fi.Fields,
 	})
+}
+
+// MySubmissionsHandler 查询当前用户的提交记录
+func (h *Handler) MySubmissionsHandler(w http.ResponseWriter, r *http.Request) {
+	session := h.getCurrentUser(r)
+	if session == nil {
+		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+		return
+	}
+
+	items := make([]map[string]interface{}, 0)
+
+	for _, fi := range h.formMap {
+		tableName := fi.Model.TableName
+		if tableName == "" {
+			tableName = "form_" + fi.Name
+		}
+		if !h.db.TableExists(tableName) {
+			continue
+		}
+
+		rows, err := h.db.Query(tableName, "owner_user_id = ?", session.UserID)
+		if err != nil {
+			continue
+		}
+
+		for _, row := range rows {
+			record := map[string]interface{}{
+				"formName":    fi.Name,
+				"formTitle":   fi.Title,
+				"submittedAt": row["_submitted_at"],
+				"ip":          row["_ip"],
+				"fields":      fi.Fields,
+				"data":        map[string]interface{}{},
+			}
+
+			payload := make(map[string]interface{})
+			for _, f := range fi.Fields {
+				if val, ok := row[f.Name]; ok {
+					payload[f.Name] = val
+				}
+			}
+			record["data"] = payload
+			items = append(items, record)
+		}
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		left, _ := items[i]["submittedAt"].(string)
+		right, _ := items[j]["submittedAt"].(string)
+		return left > right
+	})
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"status": "success",
+		"items":  items,
+	})
+}
+
+// UpdateUserRoleHandler 管理员更新用户角色
+func (h *Handler) UpdateUserRoleHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID int    `json:"userId"`
+		Role   string `json:"role"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+		return
+	}
+	if req.Role != "admin" && req.Role != "user" {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "角色非法"})
+		return
+	}
+	if req.UserID <= 0 {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "用户ID非法"})
+		return
+	}
+
+	targetUser, err := h.db.GetUserByID(req.UserID)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "查询用户失败"})
+		return
+	}
+	if targetUser == nil {
+		jsonResponse(w, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(targetUser.Username), "admin") {
+		jsonResponse(w, http.StatusForbidden, map[string]string{"error": "admin用户角色不可修改"})
+		return
+	}
+
+	if err := h.db.UpdateUserRole(req.UserID, req.Role); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "更新角色失败"})
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]string{"status": "success"})
+}
+
+// ListUsersHandler 管理员查看用户列表
+func (h *Handler) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
+	users, err := h.db.ListUsers()
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "查询用户失败"})
+		return
+	}
+
+	result := make([]map[string]interface{}, 0, len(users))
+	for _, u := range users {
+		result = append(result, map[string]interface{}{
+			"id":        u.ID,
+			"username":  u.Username,
+			"role":      u.Role,
+			"createdAt": u.CreatedAt,
+		})
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"status": "success",
+		"items":  result,
+	})
+}
+
+// ChangePasswordHandler 当前登录用户修改自己的密码
+func (h *Handler) ChangePasswordHandler(w http.ResponseWriter, r *http.Request) {
+	session := h.getCurrentUser(r)
+	if session == nil {
+		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+		return
+	}
+
+	var req struct {
+		OldPassword string `json:"oldPassword"`
+		NewPassword string `json:"newPassword"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+		return
+	}
+
+	if len(req.NewPassword) < 6 {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "新密码至少 6 位"})
+		return
+	}
+
+	u, err := h.db.GetUserByID(session.UserID)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "查询用户失败"})
+		return
+	}
+	if u == nil {
+		jsonResponse(w, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+		return
+	}
+
+	if !verifyPassword(req.OldPassword, u.PasswordHash) {
+		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "原密码错误"})
+		return
+	}
+
+	if err := h.db.UpdateUserPassword(session.UserID, hashPassword(req.NewPassword)); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "更新密码失败"})
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]string{"status": "success"})
+}
+
+// AdminUpdateUserPasswordHandler 管理员修改指定用户密码
+func (h *Handler) AdminUpdateUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	operator := h.getCurrentUser(r)
+	if operator == nil {
+		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+		return
+	}
+
+	var req struct {
+		UserID      int    `json:"userId"`
+		NewPassword string `json:"newPassword"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+		return
+	}
+
+	if req.UserID <= 0 {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "用户ID非法"})
+		return
+	}
+	if len(req.NewPassword) < 6 {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "新密码至少 6 位"})
+		return
+	}
+
+	u, err := h.db.GetUserByID(req.UserID)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "查询用户失败"})
+		return
+	}
+	if u == nil {
+		jsonResponse(w, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+		return
+	}
+
+	if strings.EqualFold(strings.TrimSpace(u.Username), "admin") && !strings.EqualFold(strings.TrimSpace(operator.Username), "admin") {
+		jsonResponse(w, http.StatusForbidden, map[string]string{"error": "admin密码仅允许admin账户本人修改"})
+		return
+	}
+
+	if err := h.db.UpdateUserPassword(req.UserID, hashPassword(req.NewPassword)); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "更新密码失败"})
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]string{"status": "success"})
 }
 
 func getClientIP(r *http.Request) string {

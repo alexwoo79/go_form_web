@@ -8,12 +8,12 @@ database:
 
 # 包含的其他配置文件（支持通配符）
 includes:
-  - "marketing_forms.yaml"
-  - "hr_forms.yaml"
-  - "survey_forms.yaml"
-  - "project_forms.yaml"
+  # - "marketing_forms.yaml"
+  # - "hr_forms.yaml"
+  # - "survey_forms.yaml"
+  # - "project_forms.yaml"
   # 也可以使用通配符：
-  # - "*.yaml"
+  - "*.yaml"
 
 forms:
   # 表单 1: 用户注册（核心表单）

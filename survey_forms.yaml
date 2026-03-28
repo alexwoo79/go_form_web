@@ -127,3 +127,86 @@ forms:
         type: "textarea"
         placeholder: "请详细描述您的业务场景和需求..."
         required: false
+
+  - name: "employee_performance_review"
+    title: "员工绩效考核评分"
+    description: "模拟公司领导对员工关键能力项进行量化评分"
+    model:
+      table_name: "survey_employee_performance_review"
+    fields:
+      - name: "reviewer_name"
+        label: "考核人（领导）"
+        type: "text"
+        placeholder: "请输入考核人姓名"
+        required: true
+      - name: "employee_name"
+        label: "被考核员工"
+        type: "text"
+        placeholder: "请输入员工姓名"
+        required: true
+      - name: "department"
+        label: "所属部门"
+        type: "select"
+        options:
+          - "研发部"
+          - "产品部"
+          - "设计部"
+          - "运营部"
+          - "市场部"
+          - "人力资源部"
+          - "财务部"
+        required: true
+      - name: "review_period"
+        label: "考核周期"
+        type: "select"
+        options:
+          - "2026 Q1"
+          - "2026 Q2"
+          - "2026 Q3"
+          - "2026 Q4"
+          - "年度考核"
+        required: true
+      - name: "goal_achievement"
+        label: "目标达成（0-50）"
+        type: "range"
+        min: 0
+        max: 100
+        required: true
+      - name: "execution_efficiency"
+        label: "执行效率（0-50）"
+        type: "range"
+        min: 0
+        max: 50
+        required: true
+      - name: "team_collaboration"
+        label: "团队协作（0-50）"
+        type: "range"
+        min: 0
+        max: 50
+        required: true
+      - name: "innovation_capability"
+        label: "创新能力（0-50）"
+        type: "range"
+        min: 0
+        max: 50
+        required: true
+      - name: "professionalism"
+        label: "职业素养（0-50）"
+        type: "range"
+        min: 0
+        max: 50
+        required: true
+      - name: "overall_grade"
+        label: "综合评级"
+        type: "radio"
+        options:
+          - "A（优秀）"
+          - "B（良好）"
+          - "C（合格）"
+          - "D（待提升）"
+        required: true
+      - name: "manager_comment"
+        label: "领导评语"
+        type: "textarea"
+        placeholder: "请填写对员工表现的综合评价与改进建议"
+        required: false

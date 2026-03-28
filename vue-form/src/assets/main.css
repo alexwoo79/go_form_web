@@ -1,0 +1,19 @@
+@import './base.css';
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
+
+a,
+.green {
+  text-decoration: none;
+  color: var(--brand-600);
+  transition: color 0.2s ease;
+}
+
+@media (hover: hover) {
+  a:hover {
+    color: var(--brand-700);
+  }
+}
