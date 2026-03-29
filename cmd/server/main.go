@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"go-web/internal/config"
@@ -10,18 +12,30 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
+	"time"
 )
 
 func ensureRuntimeDirs(dbPath string) error {
-	if err := os.MkdirAll("data", 0755); err != nil {
-		return err
+	if dbPath == "" {
+		return fmt.Errorf("ensureRuntimeDirs: dbPath must not be empty")
 	}
 
-	dbDir := filepath.Dir(dbPath)
+	absDBPath, err := filepath.Abs(dbPath)
+	if err != nil {
+		return fmt.Errorf("ensureRuntimeDirs: resolve absolute path for %q: %w", dbPath, err)
+	}
+
+	if err := os.MkdirAll("data", 0755); err != nil {
+		return fmt.Errorf("ensureRuntimeDirs: create data directory: %w", err)
+	}
+
+	dbDir := filepath.Dir(absDBPath)
 	if dbDir != "." && dbDir != "" {
 		if err := os.MkdirAll(dbDir, 0755); err != nil {
-			return err
+			return fmt.Errorf("ensureRuntimeDirs: create database directory %q: %w", dbDir, err)
 		}
 	}
 
@@ -67,6 +81,8 @@ func firstLocalIPv4() string {
 func main() {
 	configPath := flag.String("config", "config.yaml", "配置文件路径")
 	port := flag.String("port", "8080", "服务端口")
+	tlsCert := flag.String("tls-cert", "", "TLS 证书文件路径（与 --tls-key 同时提供时启用 HTTPS）")
+	tlsKey := flag.String("tls-key", "", "TLS 私钥文件路径（与 --tls-cert 同时提供时启用 HTTPS）")
 	flag.Parse()
 
 	// 加载配置
@@ -84,7 +100,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("数据库初始化失败: %v", err)
 	}
-	defer db.Close()
 
 	// 转换表单配置
 	formInfos := make([]handler.FormInfo, 0, len(cfg.Forms))
@@ -208,6 +223,12 @@ func main() {
 	// 创建路由（使用 gorilla/mux）
 	r := config.NewRouter(h)
 
+	// 健康检查端点
+	r.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}).Methods(http.MethodGet)
+
 	listenAddr := fmt.Sprintf("0.0.0.0:%s", *port)
 	log.Printf("服务器启动成功，监听地址：%s", listenAddr)
 	if ip := firstLocalIPv4(); ip != "" {
@@ -223,7 +244,46 @@ func main() {
 		log.Printf("表单已加载：%s (%s)", fi.Title, fi.Name)
 	}
 
-	if err := http.ListenAndServe(listenAddr, r); err != nil {
-		log.Fatalf("服务器启动失败：%v", err)
+	srv := &http.Server{
+		Addr:         listenAddr,
+		Handler:      r,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
+
+	// 在后台 goroutine 启动服务器
+	serverErr := make(chan error, 1)
+	go func() {
+		if *tlsCert != "" && *tlsKey != "" {
+			log.Printf("TLS 已启用，使用证书：%s", *tlsCert)
+			serverErr <- srv.ListenAndServeTLS(*tlsCert, *tlsKey)
+		} else {
+			serverErr <- srv.ListenAndServe()
+		}
+	}()
+
+	// 捕获 SIGINT / SIGTERM，实现优雅关机
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	select {
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("服务器启动失败：%v", err)
+		}
+	case <-ctx.Done():
+		log.Printf("收到退出信号，开始优雅关机...")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("服务器关闭时发生错误：%v", err)
+	}
+	if err := db.Close(); err != nil {
+		log.Printf("数据库关闭时发生错误：%v", err)
+	}
+	log.Printf("服务器已关闭")
 }
