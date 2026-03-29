@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"go-web/internal/models"
 	"io"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"gopkg.in/yaml.v3"
 )
 
 // JSON 响应工具函数
@@ -111,20 +114,30 @@ func (sm *SessionManager) CleanupExpiredSessions() {
 type Handler struct {
 	db         *models.Database
 	formMap    map[string]FormInfo
+	formMu     sync.RWMutex
 	sessionMgr *SessionManager
+	configPath string
+	reloadFn   func() ([]FormInfo, error)
 }
 
 type FormInfo struct {
 	Name          string
 	Title         string
 	Description   string
+	Category      string
+	Pinned        bool
+	SortOrder     int
+	Priority      string
+	Status        string
+	PublishAt     string
 	ExpireAt      string // 表单到期时间，支持 RFC3339、2006-01-02 15:04:05、2006-01-02
 	DataDirectory string
 	Model         struct {
 		TableName string
 	}
-	Fields      []FieldInfo
-	FileModTime int64 // 配置文件修改时间戳
+	Fields       []FieldInfo
+	FileModTime  int64  // 配置文件修改时间戳
+	ConfigSource string // 来源配置文件名，空 = 主配置
 }
 
 type FieldInfo struct {
@@ -138,7 +151,7 @@ type FieldInfo struct {
 	Max         *float64
 }
 
-func New(db *models.Database, formConfigs []FormInfo) *Handler {
+func New(db *models.Database, formConfigs []FormInfo, configPath string, reloadFn func() ([]FormInfo, error)) *Handler {
 	formMap := make(map[string]FormInfo)
 	for _, fi := range formConfigs {
 		formMap[fi.Name] = fi
@@ -148,10 +161,16 @@ func New(db *models.Database, formConfigs []FormInfo) *Handler {
 		db:         db,
 		formMap:    formMap,
 		sessionMgr: NewSessionManager(),
+		configPath: configPath,
+		reloadFn:   reloadFn,
 	}
 
 	if err := h.db.EnsureUserTable(); err != nil {
 		panic("初始化用户表失败: " + err.Error())
+	}
+
+	if err := h.db.EnsureShareLinkTable(); err != nil {
+		panic("初始化分享链接表失败: " + err.Error())
 	}
 
 	adminUser, err := h.db.GetUserByUsername("admin")
@@ -281,6 +300,196 @@ func parseExpireAt(raw string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid expire_at format: %s", raw)
 }
 
+func parseFormTime(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+
+	for _, layout := range layouts {
+		if t, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			return t, true
+		}
+	}
+
+	return time.Time{}, false
+}
+
+func normalizeFormStatus(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "draft":
+		return "draft"
+	case "archived":
+		return "archived"
+	default:
+		return "published"
+	}
+}
+
+func normalizePriority(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "high":
+		return "high"
+	case "low":
+		return "low"
+	default:
+		return "medium"
+	}
+}
+
+func statusWeight(status string) int {
+	switch normalizeFormStatus(status) {
+	case "published":
+		return 0
+	case "draft":
+		return 1
+	default:
+		return 2
+	}
+}
+
+func priorityWeight(priority string) int {
+	switch normalizePriority(priority) {
+	case "high":
+		return 0
+	case "medium":
+		return 1
+	default:
+		return 2
+	}
+}
+
+func (h *Handler) isFormPublished(fi FormInfo) bool {
+	return normalizeFormStatus(fi.Status) == "published"
+}
+
+func compareFormOrder(a, b FormInfo) bool {
+	if a.Pinned != b.Pinned {
+		return a.Pinned
+	}
+
+	aStatus := statusWeight(a.Status)
+	bStatus := statusWeight(b.Status)
+	if aStatus != bStatus {
+		return aStatus < bStatus
+	}
+
+	if a.SortOrder != b.SortOrder {
+		return a.SortOrder < b.SortOrder
+	}
+
+	aPriority := priorityWeight(a.Priority)
+	bPriority := priorityWeight(b.Priority)
+	if aPriority != bPriority {
+		return aPriority < bPriority
+	}
+
+	aPublish, aOk := parseFormTime(a.PublishAt)
+	bPublish, bOk := parseFormTime(b.PublishAt)
+	if aOk && bOk && !aPublish.Equal(bPublish) {
+		return aPublish.After(bPublish)
+	}
+	if aOk != bOk {
+		return aOk
+	}
+
+	return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+}
+
+func (h *Handler) listForms(includeNonPublished bool) []FormInfo {
+	h.formMu.RLock()
+	forms := make([]FormInfo, 0, len(h.formMap))
+	for _, fi := range h.formMap {
+		fi.Status = normalizeFormStatus(fi.Status)
+		fi.Priority = normalizePriority(fi.Priority)
+		if strings.TrimSpace(fi.Category) == "" {
+			fi.Category = "general"
+		}
+
+		if !includeNonPublished && !h.isFormPublished(fi) {
+			continue
+		}
+		if !includeNonPublished && h.isFormExpired(fi) {
+			continue
+		}
+
+		forms = append(forms, fi)
+	}
+	h.formMu.RUnlock()
+
+	sort.Slice(forms, func(i, j int) bool {
+		return compareFormOrder(forms[i], forms[j])
+	})
+
+	return forms
+}
+
+func normalizeCategory(raw string) string {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	if v == "" {
+		return "general"
+	}
+	return v
+}
+
+func normalizeAdminFilterStatus(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "draft":
+		return "draft"
+	case "archived":
+		return "archived"
+	case "published":
+		return "published"
+	default:
+		return "all"
+	}
+}
+
+func toBoolWithDefault(raw string, defaultVal bool) bool {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	if raw == "" {
+		return defaultVal
+	}
+
+	switch raw {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return defaultVal
+	}
+}
+
+func matchesAdminFilters(fi FormInfo, statusFilter, categoryFilter, keyword string, includeExpired bool, isExpired bool) bool {
+	if !includeExpired && isExpired {
+		return false
+	}
+
+	if statusFilter != "all" && normalizeFormStatus(fi.Status) != statusFilter {
+		return false
+	}
+
+	if categoryFilter != "all" && normalizeCategory(fi.Category) != categoryFilter {
+		return false
+	}
+
+	if keyword != "" {
+		haystack := strings.ToLower(strings.Join([]string{fi.Name, fi.Title, fi.Description}, " "))
+		if !strings.Contains(haystack, keyword) {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (h *Handler) isFormExpired(fi FormInfo) bool {
 	if strings.TrimSpace(fi.ExpireAt) == "" {
 		return false
@@ -316,15 +525,19 @@ func (h *Handler) IndexHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	formList := make([]map[string]interface{}, 0, len(h.formMap))
-	for _, fi := range h.formMap {
-		if h.isFormExpired(fi) {
-			continue
-		}
+	forms := h.listForms(false)
+	formList := make([]map[string]interface{}, 0, len(forms))
+	for _, fi := range forms {
 		formList = append(formList, map[string]interface{}{
 			"Name":        fi.Name,
 			"Title":       fi.Title,
 			"Description": fi.Description,
+			"Category":    fi.Category,
+			"Pinned":      fi.Pinned,
+			"SortOrder":   fi.SortOrder,
+			"Priority":    fi.Priority,
+			"Status":      fi.Status,
+			"PublishAt":   fi.PublishAt,
 			"ExpireAt":    fi.ExpireAt,
 		})
 	}
@@ -334,15 +547,19 @@ func (h *Handler) IndexHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) FormListHandler(w http.ResponseWriter, r *http.Request) {
-	formList := make([]map[string]interface{}, 0, len(h.formMap))
-	for _, fi := range h.formMap {
-		if h.isFormExpired(fi) {
-			continue
-		}
+	forms := h.listForms(false)
+	formList := make([]map[string]interface{}, 0, len(forms))
+	for _, fi := range forms {
 		formList = append(formList, map[string]interface{}{
 			"Name":        fi.Name,
 			"Title":       fi.Title,
 			"Description": fi.Description,
+			"Category":    fi.Category,
+			"Pinned":      fi.Pinned,
+			"SortOrder":   fi.SortOrder,
+			"Priority":    fi.Priority,
+			"Status":      fi.Status,
+			"PublishAt":   fi.PublishAt,
 			"ExpireAt":    fi.ExpireAt,
 		})
 	}
@@ -353,13 +570,14 @@ func (h *Handler) FormListHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) FormPageHandler(w http.ResponseWriter, r *http.Request) {
 	formName := mux.Vars(r)["formName"]
-	fi, exists := h.formMap[formName]
+	fi, exists := h.getForm(formName)
 	if !exists {
 		http.NotFound(w, r)
 		return
 	}
-	if h.isFormExpired(fi) {
-		jsonResponse(w, http.StatusGone, map[string]string{"error": "该表单已到期，停止收集"})
+
+	if blocked, msg := h.checkFormReadable(fi); blocked {
+		jsonResponse(w, http.StatusGone, map[string]string{"error": msg})
 		return
 	}
 
@@ -391,15 +609,298 @@ func (h *Handler) FormPageHandler(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, form)
 }
 
+func (h *Handler) checkFormReadable(fi FormInfo) (bool, string) {
+	if !h.isFormPublished(fi) {
+		return true, "该表单当前不可填写"
+	}
+	if h.isFormExpired(fi) {
+		return true, "该表单已到期，停止收集"
+	}
+	return false, ""
+}
+
+func normalizePayloadArray(val interface{}) []interface{} {
+	switch v := val.(type) {
+	case []interface{}:
+		return v
+	case []string:
+		arr := make([]interface{}, 0, len(v))
+		for _, item := range v {
+			arr = append(arr, item)
+		}
+		return arr
+	default:
+		if v == nil {
+			return nil
+		}
+		return []interface{}{v}
+	}
+}
+
+func (h *Handler) validateRequiredFields(fi FormInfo, data map[string]interface{}) error {
+	for _, field := range fi.Fields {
+		if !field.Required {
+			continue
+		}
+
+		val, exists := data[field.Name]
+		if !exists || val == nil {
+			return fmt.Errorf("%s 为必填项", field.Label)
+		}
+
+		switch field.Type {
+		case "text", "email", "tel", "url", "password", "textarea", "select", "date", "time", "radio":
+			if str, ok := val.(string); ok && strings.TrimSpace(str) == "" {
+				return fmt.Errorf("%s 为必填项", field.Label)
+			}
+		case "number", "range":
+			if num, ok := val.(float64); ok && num != num {
+				return fmt.Errorf("%s 为必填项", field.Label)
+			}
+		case "checkbox":
+			if len(normalizePayloadArray(val)) == 0 {
+				return fmt.Errorf("%s 为必填项", field.Label)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (h *Handler) finalizeSubmission(fi FormInfo, data map[string]interface{}, ownerUserID int, ip string) error {
+	data["_submitted_at"] = time.Now().Format("2006-01-02 15:04:05")
+	data["_ip"] = ip
+	data["owner_user_id"] = ownerUserID
+	return h.saveToDatabase(fi, data)
+}
+
+func generateShareToken() (string, error) {
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw), nil
+}
+
+func getRequestScheme(r *http.Request) string {
+	if proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); proto != "" {
+		parts := strings.Split(proto, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
+func firstLocalIPv4() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+
+			ipv4 := ip.To4()
+			if ipv4 != nil {
+				return ipv4.String()
+			}
+		}
+	}
+
+	return ""
+}
+
+func resolveShareHost(hostport string) string {
+	host := strings.TrimSpace(hostport)
+	port := ""
+
+	if strings.Contains(host, ":") {
+		if h, p, err := net.SplitHostPort(host); err == nil {
+			host = h
+			port = p
+		}
+	}
+
+	host = strings.Trim(host, "[]")
+	normalized := strings.ToLower(host)
+	if normalized == "" || normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1" {
+		if ip := firstLocalIPv4(); ip != "" {
+			host = ip
+		}
+	}
+
+	if port != "" {
+		return net.JoinHostPort(host, port)
+	}
+	return host
+}
+
+func buildShareURL(r *http.Request, token string) string {
+	host := resolveShareHost(r.Host)
+	return fmt.Sprintf("%s://%s/s/%s", getRequestScheme(r), host, token)
+}
+
+func (h *Handler) resolveFormByShareToken(token string) (FormInfo, bool) {
+	rec, err := h.db.GetShareLink(token)
+	if err != nil || rec == nil {
+		return FormInfo{}, false
+	}
+	fi, exists := h.getForm(rec.FormName)
+	if !exists {
+		return FormInfo{}, false
+	}
+	return fi, true
+}
+
+func (h *Handler) CreateShareLinkHandler(w http.ResponseWriter, r *http.Request) {
+	session := h.getCurrentUser(r)
+	if session == nil {
+		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+		return
+	}
+
+	var req struct {
+		FormName string `json:"formName"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+		return
+	}
+
+	formName := strings.TrimSpace(req.FormName)
+	fi, exists := h.getForm(formName)
+	if !exists {
+		jsonResponse(w, http.StatusNotFound, map[string]string{"error": "表单不存在"})
+		return
+	}
+
+	token, err := generateShareToken()
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "生成链接失败"})
+		return
+	}
+
+	if err := h.db.CreateShareLink(token, fi.Name, session.UserID); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "保存链接失败"})
+		return
+	}
+
+	jsonResponse(w, http.StatusCreated, map[string]interface{}{
+		"formName": fi.Name,
+		"title":    fi.Title,
+		"url":      buildShareURL(r, token),
+		"token":    token,
+		"expireAt": fi.ExpireAt,
+	})
+}
+
+func (h *Handler) PublicFormPageHandler(w http.ResponseWriter, r *http.Request) {
+	token := mux.Vars(r)["token"]
+	fi, ok := h.resolveFormByShareToken(token)
+	if !ok {
+		jsonResponse(w, http.StatusNotFound, map[string]string{"error": "分享链接无效"})
+		return
+	}
+
+	if blocked, msg := h.checkFormReadable(fi); blocked {
+		jsonResponse(w, http.StatusGone, map[string]string{"error": msg})
+		return
+	}
+
+	form := map[string]interface{}{
+		"Name":          fi.Name,
+		"Title":         fi.Title,
+		"Description":   fi.Description,
+		"DataDirectory": fi.DataDirectory,
+		"Model":         fi.Model,
+		"Mode":          "public_share",
+	}
+
+	fields := make([]map[string]interface{}, 0, len(fi.Fields))
+	for _, f := range fi.Fields {
+		fields = append(fields, map[string]interface{}{
+			"Name":        f.Name,
+			"Label":       f.Label,
+			"Type":        f.Type,
+			"Placeholder": f.Placeholder,
+			"Required":    f.Required,
+			"Options":     f.Options,
+			"Min":         f.Min,
+			"Max":         f.Max,
+		})
+	}
+	form["Fields"] = fields
+
+	jsonResponse(w, http.StatusOK, form)
+}
+
+func (h *Handler) PublicSubmitHandler(w http.ResponseWriter, r *http.Request) {
+	token := mux.Vars(r)["token"]
+	fi, ok := h.resolveFormByShareToken(token)
+	if !ok {
+		jsonResponse(w, http.StatusNotFound, map[string]string{"error": "分享链接无效"})
+		return
+	}
+
+	if blocked, msg := h.checkFormReadable(fi); blocked {
+		jsonResponse(w, http.StatusGone, map[string]string{"error": msg})
+		return
+	}
+
+	data := make(map[string]interface{})
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "JSON 解析失败"})
+		return
+	}
+
+	if err := h.validateRequiredFields(fi, data); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if err := h.finalizeSubmission(fi, data, 0, getClientIP(r)); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "数据库保存失败"})
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"status":  "success",
+		"message": "数据提交成功",
+	})
+}
+
 func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 	formName := mux.Vars(r)["formName"]
-	fi, exists := h.formMap[formName]
+	fi, exists := h.getForm(formName)
 	if !exists {
 		http.NotFound(w, r)
 		return
 	}
-	if h.isFormExpired(fi) {
-		jsonResponse(w, http.StatusGone, map[string]string{"error": "该表单已到期，停止收集"})
+	if blocked, msg := h.checkFormReadable(fi); blocked {
+		jsonResponse(w, http.StatusGone, map[string]string{"error": msg})
 		return
 	}
 
@@ -484,100 +985,15 @@ func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 验证必填字段 (针对所有提交方式)
-	fmt.Printf("🔍 开始验证必填字段，共 %d 个字段\n", len(fi.Fields))
-	for _, field := range fi.Fields {
-		if field.Required {
-			val, exists := data[field.Name]
-			fmt.Printf("  字段：%s (类型：%s), 存在：%v, 值：%v (类型：%T)\n", field.Label, field.Type, exists, val, val)
-
-			// 检查是否存在且不为空
-			if !exists || val == nil {
-				fmt.Printf("    ❌ 验证失败：值不存在或为 nil\n")
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"status":  "error",
-					"message": fmt.Sprintf("%s 为必填项", field.Label),
-				})
-				return
-			}
-
-			// 根据字段类型进行具体验证
-			switch field.Type {
-			case "text", "email", "tel", "url", "password", "textarea", "select", "date", "time":
-				// 字符串类型检查是否为空
-				if str, ok := val.(string); ok && str == "" {
-					fmt.Printf("    ❌ 验证失败：空字符串\n")
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusBadRequest)
-					json.NewEncoder(w).Encode(map[string]interface{}{
-						"status":  "error",
-						"message": fmt.Sprintf("%s 为必填项", field.Label),
-					})
-					return
-				}
-			case "radio":
-				// Radio 类型特殊处理
-				if str, ok := val.(string); ok && str == "" {
-					fmt.Printf("    ❌ 验证失败：空字符串\n")
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusBadRequest)
-					json.NewEncoder(w).Encode(map[string]interface{}{
-						"status":  "error",
-						"message": fmt.Sprintf("%s 为必填项", field.Label),
-					})
-					return
-				}
-			case "number", "range":
-				// 数字类型检查是否为 0 或空
-				if num, ok := val.(float64); ok {
-					// 注意：0 是有效值，只有 NaN 才无效
-					if num != num { // NaN check
-						fmt.Printf("    ❌ 验证失败：NaN\n")
-						w.Header().Set("Content-Type", "application/json")
-						w.WriteHeader(http.StatusBadRequest)
-						json.NewEncoder(w).Encode(map[string]interface{}{
-							"status":  "error",
-							"message": fmt.Sprintf("%s 为必填项", field.Label),
-						})
-						return
-					}
-				}
-			case "checkbox":
-				// checkbox 数组检查是否为空数组
-				var slice []interface{}
-				switch v := val.(type) {
-				case []interface{}:
-					slice = v
-				case []string:
-					for _, s := range v {
-						slice = append(slice, s)
-					}
-				default:
-					// 其他类型视为单个值
-					slice = []interface{}{v}
-				}
-
-				if len(slice) == 0 {
-					fmt.Printf("    ❌ 验证失败：空数组\n")
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusBadRequest)
-					json.NewEncoder(w).Encode(map[string]interface{}{
-						"status":  "error",
-						"message": fmt.Sprintf("%s 为必填项", field.Label),
-					})
-					return
-				}
-			}
-
-			fmt.Printf("    ✅ 验证通过\n")
-		}
+	if err := h.validateRequiredFields(fi, data); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": err.Error(),
+		})
+		return
 	}
-
-	data["_submitted_at"] = time.Now().Format("2006-01-02 15:04:05")
-	data["_ip"] = getClientIP(r)
-	data["owner_user_id"] = session.UserID
 
 	// 只保存到数据库，不再保存 JSON 文件
 	// if err := h.saveToFile(fi, data); err != nil {
@@ -590,7 +1006,7 @@ func (h *Handler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 	// 	return
 	// }
 
-	if err := h.saveToDatabase(fi, data); err != nil {
+	if err := h.finalizeSubmission(fi, data, session.UserID, getClientIP(r)); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -773,8 +1189,51 @@ func (h *Handler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AdminHandler(w http.ResponseWriter, r *http.Request) {
 	session := h.getCurrentUser(r)
 
-	formList := make([]map[string]interface{}, 0, len(h.formMap))
-	for _, fi := range h.formMap {
+	forms := h.listForms(true)
+	q := r.URL.Query()
+	statusFilter := normalizeAdminFilterStatus(q.Get("status"))
+	categoryFilter := strings.ToLower(strings.TrimSpace(q.Get("category")))
+	if categoryFilter == "" {
+		categoryFilter = "all"
+	}
+	keyword := strings.ToLower(strings.TrimSpace(q.Get("keyword")))
+	includeExpired := toBoolWithDefault(q.Get("include_expired"), true)
+
+	byStatus := map[string]int{
+		"published": 0,
+		"draft":     0,
+		"archived":  0,
+	}
+	byCategory := map[string]int{}
+	pinnedCount := 0
+	expiredCount := 0
+
+	for _, fi := range forms {
+		status := normalizeFormStatus(fi.Status)
+		category := normalizeCategory(fi.Category)
+		byStatus[status]++
+		byCategory[category]++
+		if fi.Pinned {
+			pinnedCount++
+		}
+		if h.isFormExpired(fi) {
+			expiredCount++
+		}
+	}
+
+	categoryList := make([]string, 0, len(byCategory))
+	for category := range byCategory {
+		categoryList = append(categoryList, category)
+	}
+	sort.Strings(categoryList)
+
+	formList := make([]map[string]interface{}, 0, len(forms))
+	for _, fi := range forms {
+		isExpired := h.isFormExpired(fi)
+		if !matchesAdminFilters(fi, statusFilter, categoryFilter, keyword, includeExpired, isExpired) {
+			continue
+		}
+
 		// 获取数据条数
 		tableName := fi.Model.TableName
 		if tableName == "" {
@@ -790,28 +1249,46 @@ func (h *Handler) AdminHandler(w http.ResponseWriter, r *http.Request) {
 			"Name":        fi.Name,
 			"Title":       fi.Title,
 			"Description": fi.Description,
+			"Category":    normalizeCategory(fi.Category),
+			"Pinned":      fi.Pinned,
+			"SortOrder":   fi.SortOrder,
+			"Priority":    normalizePriority(fi.Priority),
+			"Status":      normalizeFormStatus(fi.Status),
+			"PublishAt":   fi.PublishAt,
+			"ExpireAt":    fi.ExpireAt,
+			"IsExpired":   isExpired,
 			"FieldCount":  len(fi.Fields),
-			"DataCount":   count,          // 添加数据条数
-			"FileModTime": fi.FileModTime, // 添加文件修改时间用于排序
+			"DataCount":   count,
+			"FileModTime": fi.FileModTime,
 		})
 	}
 
-	// 按文件修改时间倒序排序（最新的显示在最前面）
-	sort.Slice(formList, func(i, j int) bool {
-		return formList[i]["FileModTime"].(int64) > formList[j]["FileModTime"].(int64)
-	})
-
 	// JSON 响应
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"forms": formList,
-		"user":  session,
+		"forms":               formList,
+		"user":                session,
+		"availableCategories": categoryList,
+		"filters": map[string]interface{}{
+			"status":          statusFilter,
+			"category":        categoryFilter,
+			"keyword":         keyword,
+			"include_expired": includeExpired,
+		},
+		"summary": map[string]interface{}{
+			"total":        len(forms),
+			"visible":      len(formList),
+			"pinnedCount":  pinnedCount,
+			"expiredCount": expiredCount,
+			"byStatus":     byStatus,
+			"byCategory":   byCategory,
+		},
 	})
 }
 
 // ExportCSVHandler 导出 CSV 文件
 func (h *Handler) ExportCSVHandler(w http.ResponseWriter, r *http.Request) {
 	formName := mux.Vars(r)["formName"]
-	fi, exists := h.formMap[formName]
+	fi, exists := h.getForm(formName)
 	if !exists {
 		http.NotFound(w, r)
 		return
@@ -864,7 +1341,7 @@ func (h *Handler) ExportCSVHandler(w http.ResponseWriter, r *http.Request) {
 // ViewDataHandler 查看表单数据（JSON 格式）
 func (h *Handler) ViewDataHandler(w http.ResponseWriter, r *http.Request) {
 	formName := mux.Vars(r)["formName"]
-	fi, exists := h.formMap[formName]
+	fi, exists := h.getForm(formName)
 	if !exists {
 		http.NotFound(w, r)
 		return
@@ -910,7 +1387,14 @@ func (h *Handler) MySubmissionsHandler(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]map[string]interface{}, 0)
 
+	h.formMu.RLock()
+	allForms := make([]FormInfo, 0, len(h.formMap))
 	for _, fi := range h.formMap {
+		allForms = append(allForms, fi)
+	}
+	h.formMu.RUnlock()
+
+	for _, fi := range allForms {
 		tableName := fi.Model.TableName
 		if tableName == "" {
 			tableName = "form_" + fi.Name
@@ -1134,4 +1618,151 @@ func getClientIP(r *http.Request) string {
 		ip = ip[:idx]
 	}
 	return ip
+}
+
+// getForm 安全获取表单配置（支持并发读取）
+func (h *Handler) getForm(name string) (FormInfo, bool) {
+	h.formMu.RLock()
+	defer h.formMu.RUnlock()
+	fi, ok := h.formMap[name]
+	return fi, ok
+}
+
+// reloadForms 调用外部提供的重载函数，并安全替换 formMap
+func (h *Handler) reloadForms() error {
+	if h.reloadFn == nil {
+		return fmt.Errorf("热重载未配置")
+	}
+	infos, err := h.reloadFn()
+	if err != nil {
+		return err
+	}
+	newMap := make(map[string]FormInfo, len(infos))
+	for _, fi := range infos {
+		newMap[fi.Name] = fi
+	}
+	h.formMu.Lock()
+	h.formMap = newMap
+	h.formMu.Unlock()
+	return nil
+}
+
+// resolveConfigFilePath 将表单的 ConfigSource 转换为安全的绝对路径
+func (h *Handler) resolveConfigFilePath(configSource string) (string, error) {
+	if h.configPath == "" {
+		return "", fmt.Errorf("配置路径未设置")
+	}
+
+	var target string
+	if configSource == "" {
+		// 来自主配置文件
+		target = h.configPath
+	} else {
+		// 只允许 .yaml/.yml 文件，且不允许目录穿越
+		base := filepath.Base(configSource)
+		if base == "." || base == ".." || base == "" {
+			return "", fmt.Errorf("无效的配置文件名")
+		}
+		if !strings.HasSuffix(base, ".yaml") && !strings.HasSuffix(base, ".yml") {
+			return "", fmt.Errorf("仅支持 .yaml 或 .yml 文件")
+		}
+		configDir := filepath.Dir(h.configPath)
+		target = filepath.Join(configDir, base)
+	}
+
+	// 验证路径在 configDir 范围内（防止路径穿越）
+	absTarget, err1 := filepath.Abs(target)
+	absDir, err2 := filepath.Abs(filepath.Dir(h.configPath))
+	if err1 != nil || err2 != nil {
+		return "", fmt.Errorf("路径解析失败")
+	}
+	if !strings.HasPrefix(absTarget, absDir+string(filepath.Separator)) && absTarget != filepath.Clean(h.configPath) {
+		return "", fmt.Errorf("路径不合法")
+	}
+
+	return target, nil
+}
+
+// GetFormConfigHandler 返回表单所在的 YAML 文件原始内容
+func (h *Handler) GetFormConfigHandler(w http.ResponseWriter, r *http.Request) {
+	formName := mux.Vars(r)["formName"]
+	fi, ok := h.getForm(formName)
+	if !ok {
+		// 尝试直接读主配置（表单可能刚创建）
+		fi = FormInfo{Name: formName, ConfigSource: ""}
+	}
+
+	filePath, err := h.resolveConfigFilePath(fi.ConfigSource)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "读取配置文件失败: " + err.Error()})
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"formName": formName,
+		"source":   filepath.Base(filePath),
+		"content":  string(content),
+	})
+}
+
+// SaveFormConfigHandler 验证并保存 YAML 内容，然后热重载表单
+func (h *Handler) SaveFormConfigHandler(w http.ResponseWriter, r *http.Request) {
+	formName := mux.Vars(r)["formName"]
+	fi, ok := h.getForm(formName)
+	if !ok {
+		fi = FormInfo{Name: formName, ConfigSource: ""}
+	}
+
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+		return
+	}
+
+	// 验证 YAML 语法
+	var probe interface{}
+	if err := yaml.Unmarshal([]byte(req.Content), &probe); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "YAML 格式错误: " + err.Error()})
+		return
+	}
+
+	filePath, err := h.resolveConfigFilePath(fi.ConfigSource)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// 安全写入：先写临时文件再改名
+	tmpPath := filePath + ".tmp"
+	if err := os.WriteFile(tmpPath, []byte(req.Content), 0644); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "写入手失败: " + err.Error()})
+		return
+	}
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		_ = os.Remove(tmpPath)
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "保存配置文件失败: " + err.Error()})
+		return
+	}
+
+	// 热重载
+	if err := h.reloadForms(); err != nil {
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
+			"status":  "saved_reload_failed",
+			"message": "配置已保存，但重载失败: " + err.Error(),
+		})
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"status":  "success",
+		"message": "配置已保存并重载",
+	})
 }

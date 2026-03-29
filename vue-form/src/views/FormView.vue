@@ -30,13 +30,35 @@ const submitted = ref(false)
 const error = ref('')
 const submitError = ref('')
 
+function isShareMode(): boolean {
+  return typeof route.params.token === 'string' && route.params.token.trim() !== ''
+}
+
+function getFormFetchPath(): string {
+  if (isShareMode()) {
+    return `/api/public/forms/${route.params.token}`
+  }
+  return `/api/forms/${route.params.formName}`
+}
+
+function getSubmitPath(): string {
+  if (isShareMode()) {
+    return `/api/public/submit/${route.params.token}`
+  }
+  return `/api/submit/${route.params.formName}`
+}
+
 onMounted(async () => {
   try {
-    const res = await fetch(`/api/forms/${route.params.formName}`)
+    const res = await fetch(getFormFetchPath())
     if (!res.ok) {
       if (res.status === 410) {
         const data = await res.json()
         throw new Error(data.error || '该表单已到期，停止收集')
+      }
+      if (res.status === 404) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || '分享链接无效或表单不存在')
       }
       throw new Error('表单不存在')
     }
@@ -63,7 +85,7 @@ async function submit() {
   submitError.value = ''
   submitting.value = true
   try {
-    const res = await fetch(`/api/submit/${route.params.formName}`, {
+    const res = await fetch(getSubmitPath(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(formData.value),
@@ -78,7 +100,9 @@ async function submit() {
       }
       if (res.status === 401) {
         submitError.value = data.error || '请先登录'
-        setTimeout(() => router.push('/login'), 700)
+        if (!isShareMode()) {
+          setTimeout(() => router.push('/login'), 700)
+        }
         return
       }
       submitError.value = data.error || '提交失败，请重试'
@@ -140,7 +164,7 @@ function getRangeTicks(field: Field): number[] {
         <div class="success-icon">✓</div>
         <h2>提交成功！</h2>
         <p>感谢您的填写，数据已保存。</p>
-        <button @click="router.push('/')">返回首页</button>
+        <button @click="router.push(isShareMode() ? '/login' : '/')">{{ isShareMode() ? '返回登录页' : '返回首页' }}</button>
       </div>
 
       <!-- 表单 -->

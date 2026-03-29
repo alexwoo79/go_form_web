@@ -109,9 +109,14 @@ func NewRouter(h *handler.Handler) *mux.Router {
 	r.HandleFunc("/api/export/{formName}", h.RequireAdmin(h.ExportCSVHandler)).Methods("GET")
 	r.HandleFunc("/api/data/{formName}", h.RequireAdmin(h.ViewDataHandler)).Methods("GET")
 	r.HandleFunc("/api/admin", h.RequireAdmin(h.AdminHandler)).Methods("GET")
+	r.HandleFunc("/api/admin/share-links", h.RequireAdmin(h.CreateShareLinkHandler)).Methods("POST")
+	r.HandleFunc("/api/admin/form-config/{formName}", h.RequireAdmin(h.GetFormConfigHandler)).Methods("GET")
+	r.HandleFunc("/api/admin/form-config/{formName}", h.RequireAdmin(h.SaveFormConfigHandler)).Methods("PUT")
 	r.HandleFunc("/api/admin/users", h.RequireAdmin(h.ListUsersHandler)).Methods("GET")
 	r.HandleFunc("/api/admin/user-role", h.RequireAdmin(h.UpdateUserRoleHandler)).Methods("POST")
 	r.HandleFunc("/api/admin/user-password", h.RequireAdmin(h.AdminUpdateUserPasswordHandler)).Methods("POST")
+	r.HandleFunc("/api/public/forms/{token}", h.PublicFormPageHandler).Methods("GET")
+	r.HandleFunc("/api/public/submit/{token}", h.PublicSubmitHandler).Methods("POST")
 
 	// 所有其他路由由 Vue SPA 处理
 	r.PathPrefix("/").Handler(spa)

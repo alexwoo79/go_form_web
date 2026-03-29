@@ -52,12 +52,28 @@ forms:
   - name: "user_registration"
     title: "用户注册"
     description: "用户注册表单"
+    category: "general"
+    pinned: true
+    sort_order: 10
+    priority: "high"      # high | medium | low
+    status: "published"   # draft | published | archived
+    publish_at: "2026-03-20 09:00:00"
+    expire_at: "2026-12-31"
     fields:
       - name: "username"
         label: "用户名"
         type: "text"
         required: true
 ```
+
+管理排序规则（已内置）：
+
+1. `pinned=true` 置顶优先
+2. `status` 顺序：`published` > `draft` > `archived`
+3. `sort_order` 升序（越小越靠前）
+4. `priority` 顺序：`high` > `medium` > `low`
+5. `publish_at` 降序（更新的更靠前）
+6. `name` 升序兜底，保证稳定顺序
 
 ## 📋 表单字段类型
 

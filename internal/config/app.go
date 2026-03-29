@@ -46,14 +46,22 @@ func NewApp(configPath string) (*App, error) {
 			Name:          fc.Name,
 			Title:         fc.Title,
 			Description:   fc.Description,
+			Category:      fc.Category,
+			Pinned:        fc.Pinned,
+			SortOrder:     fc.SortOrder,
+			Priority:      fc.Priority,
+			Status:        fc.Status,
+			PublishAt:     fc.PublishAt,
 			ExpireAt:      fc.ExpireAt,
 			DataDirectory: fc.DataDirectory,
 			Model:         struct{ TableName string }{TableName: fc.Model.TableName},
 			Fields:        fields,
+			FileModTime:   fc.FileModTime,
+			ConfigSource:  fc.ConfigSource,
 		})
 	}
 
-	h := handler.New(db, formInfos)
+	h := handler.New(db, formInfos, "", nil)
 
 	return &App{
 		config:  cfg,

@@ -83,9 +83,11 @@ onMounted(() => {
 .global-footer {
   margin: .6rem auto 1rem;
   display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: .45rem;
-  height: 32px;
+  min-height: 32px;
   padding: 0 .85rem;
   border-radius: 999px;
   border: 1px solid rgba(206, 214, 232, .9);
@@ -99,5 +101,26 @@ onMounted(() => {
 
 .dot {
   color: #c0c7d9;
+}
+
+@media (max-width: 768px) {
+  .global-footer {
+    margin: .4rem .8rem .8rem;
+    border-radius: 12px;
+    padding: .45rem .7rem;
+    line-height: 1.35;
+  }
+
+  .dot {
+    display: none;
+  }
+
+  .theme-switch {
+    right: 10px;
+    bottom: 10px;
+    height: 34px;
+    padding: 0 .8rem;
+    font-size: .78rem;
+  }
 }
 </style>

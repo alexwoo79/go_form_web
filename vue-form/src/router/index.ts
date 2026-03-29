@@ -45,6 +45,12 @@ const router = createRouter({
       component: FormView,
       meta: { requiresAuth: true, title: '填写表单' },
     },
+    {
+      path: '/s/:token',
+      name: 'share-form',
+      component: FormView,
+      meta: { title: '填写表单' },
+    },
   ],
 })
 

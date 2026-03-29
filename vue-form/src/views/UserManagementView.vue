@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
@@ -16,14 +16,34 @@ const error = ref('')
 const success = ref('')
 const passwordDraft = ref<Record<string, string>>({})
 const passwordSaving = ref<Record<string, boolean>>({})
+const viewportWidth = ref(9999)
 const router = useRouter()
 const auth = useAuthStore()
 
+const MOBILE_BREAKPOINT = 430
+const COMPACT_BREAKPOINT = 520
+
+const isMobile = computed(() => viewportWidth.value <= MOBILE_BREAKPOINT)
+const isCompactPhone = computed(
+  () => viewportWidth.value > MOBILE_BREAKPOINT && viewportWidth.value <= COMPACT_BREAKPOINT,
+)
+
+function updateViewportMode() {
+  viewportWidth.value = window.innerWidth
+}
+
 onMounted(async () => {
+  updateViewportMode()
+  window.addEventListener('resize', updateViewportMode)
+
   if (!auth.checked) {
     await auth.fetchMe()
   }
   await loadUsers()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateViewportMode)
 })
 
 async function logout() {
@@ -159,7 +179,7 @@ function isProtectedAdmin(item: UserItem): boolean {
       <div v-else>
         <div v-if="success" class="inline-msg success">{{ success }}</div>
 
-        <div class="table-wrap user-table-wrap">
+        <div v-if="!isMobile && !isCompactPhone" class="table-wrap user-table-wrap">
           <table>
             <thead>
               <tr>
@@ -212,13 +232,64 @@ function isProtectedAdmin(item: UserItem): boolean {
             </tbody>
           </table>
         </div>
+
+        <div v-else class="mobile-list" :class="{ 'mobile-list-compact': isCompactPhone }">
+          <article v-for="u in users" :key="`mobile-${u.id}`" class="mobile-card">
+            <div class="mobile-top">
+              <span class="mobile-id">ID {{ u.id }}</span>
+              <span class="username">{{ u.username }}</span>
+            </div>
+            <div class="mobile-row">
+              <span class="mobile-label">角色</span>
+              <select
+                class="role-select"
+                :value="u.role"
+                :disabled="isProtectedAdmin(u)"
+                :title="isProtectedAdmin(u) ? 'admin用户角色不可修改' : ''"
+                @change="updateUserRole(u, ($event.target as HTMLSelectElement).value as 'admin' | 'user')"
+              >
+                <option value="user">普通用户</option>
+                <option value="admin">管理员</option>
+              </select>
+            </div>
+            <div class="mobile-row mobile-created">
+              <span class="mobile-label">创建时间</span>
+              <span>{{ u.createdAt }}</span>
+            </div>
+            <div class="mobile-row mobile-password">
+              <span class="mobile-label">新密码</span>
+              <input
+                v-model="passwordDraft[String(u.id)]"
+                class="pass-input"
+                type="password"
+                placeholder="输入新密码"
+                :disabled="!canEditPassword(u)"
+                :title="!canEditPassword(u) ? 'admin密码仅允许admin账户本人修改' : ''"
+              />
+            </div>
+            <div class="mobile-row">
+              <button
+                class="btn-pass"
+                :disabled="passwordSaving[String(u.id)] || !canSavePassword(u.id) || !canEditPassword(u)"
+                :title="!canEditPassword(u) ? 'admin密码仅允许admin账户本人修改' : ''"
+                @click="updateUserPassword(u)"
+              >
+                {{ passwordSaving[String(u.id)] ? '密码保存中…' : '密码保存' }}
+              </button>
+            </div>
+          </article>
+        </div>
       </div>
     </main>
   </div>
 </template>
 
 <style scoped>
-.page { min-height: 100vh; background: transparent; }
+.page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: transparent;
+}
 
 .site-header {
   background: linear-gradient(135deg, var(--admin-header-start) 0%, var(--admin-header-end) 100%);
@@ -261,11 +332,17 @@ function isProtectedAdmin(item: UserItem): boolean {
   background: linear-gradient(180deg, var(--surface-card-start) 0%, var(--surface-card-end) 100%);
   border-radius: 12px;
   border: 1px solid var(--surface-card-border);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
   box-shadow: var(--shadow-soft);
 }
 
-table { width: 100%; border-collapse: collapse; }
+table {
+  width: 100%;
+  min-width: 800px;
+  border-collapse: collapse;
+}
 th {
   background: #f6f8fd;
   padding: .9rem 1rem;
@@ -334,4 +411,206 @@ td {
 
 .btn-pass:hover { background: #e0e8ff; }
 .btn-pass:disabled { opacity: .6; cursor: not-allowed; }
+
+.mobile-list {
+  display: grid;
+  gap: .7rem;
+}
+
+.mobile-card {
+  border: 1px solid var(--surface-card-border);
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--surface-card-start) 0%, var(--surface-card-end) 100%);
+  box-shadow: var(--shadow-soft);
+  padding: .72rem;
+}
+
+.mobile-top {
+  display: flex;
+  align-items: center;
+  gap: .62rem;
+}
+
+.mobile-id {
+  color: #64748b;
+  font-size: .75rem;
+  font-weight: 600;
+}
+
+.mobile-row {
+  margin-top: .56rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .66rem;
+}
+
+.mobile-label {
+  color: #64748b;
+  font-size: .78rem;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+.mobile-created {
+  align-items: flex-start;
+}
+
+.mobile-created span:last-child {
+  text-align: right;
+  font-size: .8rem;
+  color: #334155;
+}
+
+.mobile-password {
+  align-items: flex-start;
+}
+
+.mobile-password .pass-input {
+  width: 100%;
+}
+
+.mobile-list-compact {
+  gap: .56rem;
+}
+
+.mobile-list-compact .mobile-card {
+  padding: .62rem;
+}
+
+.mobile-list-compact .mobile-top {
+  gap: .45rem;
+}
+
+.mobile-list-compact .mobile-id,
+.mobile-list-compact .mobile-label,
+.mobile-list-compact .mobile-created span:last-child {
+  font-size: .74rem;
+}
+
+.mobile-list-compact .username {
+  font-size: .86rem;
+}
+
+.mobile-list-compact .mobile-row {
+  margin-top: .46rem;
+}
+
+.mobile-list-compact .role-select,
+.mobile-list-compact .pass-input,
+.mobile-list-compact .btn-pass {
+  height: 28px;
+  font-size: .72rem;
+}
+
+.mobile-list-compact .btn-pass {
+  min-width: 74px;
+}
+
+@media (max-width: 768px) {
+  .site-header {
+    padding: .9rem 1rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: .65rem;
+  }
+
+  .site-header h1 {
+    font-size: 1.12rem;
+  }
+
+  .header-right {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: .5rem .7rem;
+  }
+
+  .container {
+    margin: 1rem auto;
+  }
+
+  table {
+    min-width: 760px;
+  }
+
+  th,
+  td {
+    padding: .72rem .66rem;
+    font-size: .84rem;
+  }
+
+  .role-select,
+  .pass-input {
+    height: 30px;
+    font-size: .78rem;
+    padding: 0 .5rem;
+  }
+
+  .pass-input {
+    width: 122px;
+  }
+
+  .btn-pass {
+    min-width: 70px;
+    height: 28px;
+    font-size: .74rem;
+  }
+}
+
+@media (max-width: 430px) {
+  .site-header {
+    padding: .78rem .78rem;
+  }
+
+  .header-right {
+    gap: .45rem .62rem;
+  }
+
+  .user-badge,
+  .link,
+  .btn-logout {
+    font-size: .76rem;
+  }
+
+  .btn-logout {
+    padding: .28rem .62rem;
+  }
+
+  .pass-input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .role-select {
+    min-width: 96px;
+  }
+
+  .btn-pass {
+    min-width: 86px;
+    width: 100%;
+    max-width: 180px;
+  }
+}
+
+@media (max-width: 390px) {
+  .mobile-card {
+    padding: .62rem;
+  }
+
+  .pass-input {
+    width: 100%;
+  }
+
+  .role-select,
+  .pass-input,
+  .btn-pass {
+    font-size: .72rem;
+  }
+}
+
+@media (max-width: 375px) {
+  .site-header h1 {
+    font-size: 1.02rem;
+  }
+}
 </style>

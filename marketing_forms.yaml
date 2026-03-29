@@ -3,6 +3,11 @@ forms:
   - name: "feedback"
     title: "用户反馈表单"
     description: "请告诉我们您的使用体验和建议"
+    category: "marketing"
+    sort_order: 210
+    priority: "high"
+    status: "published"
+    publish_at: "2026-03-12 09:00:00"
     model:
       table_name: "marketing_feedback"
     fields:
@@ -44,6 +49,11 @@ forms:
   - name: "newsletter"
     title: "通讯订阅表单"
     description: "订阅我们的最新资讯和产品动态"
+    category: "marketing"
+    sort_order: 220
+    priority: "medium"
+    status: "published"
+    publish_at: "2026-03-13 09:00:00"
     model:
       table_name: "marketing_newsletter"
     fields:

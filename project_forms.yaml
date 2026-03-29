@@ -3,6 +3,11 @@ forms:
   - name: "project_task"
     title: "项目任务管理"
     description: "创建和分配项目任务，跟踪进度"
+    category: "project"
+    sort_order: 310
+    priority: "high"
+    status: "published"
+    publish_at: "2026-03-14 09:00:00"
     model:
       table_name: "project_task"
     fields:
@@ -87,93 +92,4 @@ forms:
         label: "附件链接"
         type: "url"
         placeholder: "https://example.com/file.pdf"
-        required: false
-
-  - name: "meeting_room_booking"
-    title: "会议室预订"
-    description: "预订会议室，请提前填写申请信息"
-    model:
-      table_name: "meeting_room_booking"
-    fields:
-      - name: "booker_name"
-        label: "预订人姓名"
-        type: "text"
-        placeholder: "请输入您的姓名"
-        required: true
-
-      - name: "department"
-        label: "所属部门"
-        type: "select"
-        options:
-          - "技术部"
-          - "产品部"
-          - "设计部"
-          - "市场部"
-          - "人力资源部"
-          - "财务部"
-          - "行政部"
-          - "其他"
-        required: true
-
-      - name: "meeting_room"
-        label: "会议室选择"
-        type: "radio"
-        options:
-          - "A 会议室（可容纳 6 人）"
-          - "B 会议室（可容纳 10 人）"
-          - "C 会议室（可容纳 20 人）"
-          - "D 培训室（可容纳 50 人）"
-        required: true
-
-      - name: "meeting_date"
-        label: "会议日期"
-        type: "date"
-        required: true
-
-      - name: "start_time"
-        label: "开始时间"
-        type: "time"
-        required: true
-
-      - name: "end_time"
-        label: "结束时间"
-        type: "time"
-        required: true
-
-      - name: "attendees_count"
-        label: "参会人数"
-        type: "number"
-        placeholder: "请输入预计参会人数"
-        min: 1
-        max: 100
-        required: true
-
-      - name: "equipment_needed"
-        label: "所需设备"
-        type: "checkbox"
-        options:
-          - "投影仪"
-          - "白板"
-          - "视频会议系统"
-          - "音响设备"
-          - "笔记本电脑"
-          - "其他"
-        required: false
-
-      - name: "meeting_topic"
-        label: "会议主题"
-        type: "text"
-        placeholder: "请输入会议主题"
-        required: true
-
-      - name: "agenda"
-        label: "会议议程"
-        type: "textarea"
-        placeholder: "请简要说明会议内容和流程安排..."
-        required: true
-
-      - name: "special_requirements"
-        label: "特殊需求"
-        type: "textarea"
-        placeholder: "如有茶歇、打印等特殊需求请说明..."
         required: false

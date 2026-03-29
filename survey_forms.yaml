@@ -3,6 +3,12 @@ forms:
   - name: "customer_satisfaction"
     title: "客户满意度调查"
     description: "帮助我们提升服务质量，完成调查即送优惠券"
+    category: "survey"
+    sort_order: 410
+    priority: "high"
+    status: "published"
+    publish_at: "2026-03-16 09:00:00"
+    expire_at: "2026-12-28"
     model:
       table_name: "survey_customer_satisfaction"
     fields:
@@ -66,6 +72,11 @@ forms:
   - name: "product_research"
     title: "产品需求调研"
     description: "告诉我们您需要什么样的功能"
+    category: "survey"
+    sort_order: 420
+    priority: "medium"
+    status: "published"
+    publish_at: "2026-03-17 09:00:00"
     model:
       table_name: "survey_product_research"
     fields:
@@ -131,6 +142,12 @@ forms:
   - name: "employee_performance_review"
     title: "员工绩效考核评分"
     description: "模拟公司领导对员工关键能力项进行量化评分"
+    category: "survey"
+    sort_order: 430
+    priority: "medium"
+    status: "published"
+    publish_at: "2026-03-18 09:00:00"
+    expire_at: "2026-12-31"
     model:
       table_name: "survey_employee_performance_review"
     fields:

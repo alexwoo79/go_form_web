@@ -3,6 +3,11 @@ forms:
   - name: "job_application"
     title: "职位申请表"
     description: "请填写职位申请信息"
+    category: "hr"
+    sort_order: 110
+    priority: "high"
+    status: "published"
+    publish_at: "2026-03-10 09:00:00"
     model:
       table_name: "hr_job_application"
     fields:
@@ -67,6 +72,11 @@ forms:
   - name: "employee_feedback"
     title: "员工意见箱"
     description: "您的每一条建议都让我们变得更好"
+    category: "hr"
+    sort_order: 120
+    priority: "medium"
+    status: "published"
+    publish_at: "2026-03-11 09:00:00"
     model:
       table_name: "hr_employee_feedback"
     fields:

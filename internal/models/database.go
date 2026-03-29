@@ -23,6 +23,13 @@ type UserRecord struct {
 	CreatedAt    string
 }
 
+type ShareLinkRecord struct {
+	Token     string
+	FormName  string
+	CreatedBy int
+	CreatedAt string
+}
+
 func NewDatabase(dbPath, dbType string) (*Database, error) {
 	// Ensure dbType is "sqlite"
 	if dbType != "sqlite" && dbType != "sqlite3" {
@@ -473,4 +480,42 @@ func (d *Database) GetCount(tableName string) (int64, error) {
 	var count int64
 	err := d.db.QueryRow(query).Scan(&count)
 	return count, err
+}
+
+func (d *Database) EnsureShareLinkTable() error {
+	query := `CREATE TABLE IF NOT EXISTS form_share_links (
+		token TEXT PRIMARY KEY,
+		form_name TEXT NOT NULL,
+		created_by INTEGER NOT NULL,
+		created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`
+	_, err := d.db.Exec(query)
+	return err
+}
+
+func (d *Database) CreateShareLink(token, formName string, createdBy int) error {
+	if err := d.EnsureShareLinkTable(); err != nil {
+		return err
+	}
+
+	query := `INSERT INTO form_share_links (token, form_name, created_by, created_at) VALUES (?, ?, ?, datetime('now'))`
+	_, err := d.db.Exec(query, token, formName, createdBy)
+	return err
+}
+
+func (d *Database) GetShareLink(token string) (*ShareLinkRecord, error) {
+	if err := d.EnsureShareLinkTable(); err != nil {
+		return nil, err
+	}
+
+	query := `SELECT token, form_name, created_by, created_at FROM form_share_links WHERE token = ? LIMIT 1`
+	var rec ShareLinkRecord
+	err := d.db.QueryRow(query, token).Scan(&rec.Token, &rec.FormName, &rec.CreatedBy, &rec.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
 }

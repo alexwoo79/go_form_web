@@ -20,6 +20,12 @@ forms:
   - name: "user_registration"
     title: "用户注册表单"
     description: "欢迎注册我们的服务，请填写以下信息"
+    category: "general"
+    pinned: true
+    sort_order: 10
+    priority: "high"
+    status: "published"
+    publish_at: "2026-03-20 09:00:00"
     # 到期后将停止提交，且主页不再显示该表单卡片
     # 支持格式：RFC3339 / YYYY-MM-DD HH:MM:SS / YYYY-MM-DD
     expire_at: "2026-12-31"
@@ -81,6 +87,12 @@ forms:
   - name: "event_registration"
     title: "活动报名表单"
     description: "报名参加我们的技术沙龙活动"
+    category: "marketing"
+    pinned: false
+    sort_order: 30
+    priority: "medium"
+    status: "published"
+    publish_at: "2026-03-22 09:00:00"
     expire_at: "2026-03-28 23:59:59"
     model:
       table_name: "event_registration"

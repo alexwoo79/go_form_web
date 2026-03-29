@@ -30,7 +30,13 @@ type FormConfig struct {
 	Name          string       `yaml:"name"`
 	Title         string       `yaml:"title"`
 	Description   string       `yaml:"description"`
-	ExpireAt      string       `yaml:"expire_at,omitempty"` // 支持 RFC3339、2006-01-02 15:04:05、2006-01-02
+	Category      string       `yaml:"category,omitempty"`   // 分类，如 hr/marketing/project/survey
+	Pinned        bool         `yaml:"pinned,omitempty"`     // 是否置顶
+	SortOrder     int          `yaml:"sort_order,omitempty"` // 手工排序，越小越靠前
+	Priority      string       `yaml:"priority,omitempty"`   // high/medium/low
+	Status        string       `yaml:"status,omitempty"`     // draft/published/archived
+	PublishAt     string       `yaml:"publish_at,omitempty"` // 发布时间，支持 RFC3339、2006-01-02 15:04:05、2006-01-02
+	ExpireAt      string       `yaml:"expire_at,omitempty"`  // 支持 RFC3339、2006-01-02 15:04:05、2006-01-02
 	Fields        []*FormField `yaml:"fields"`
 	DataDirectory string       `yaml:"data_directory"`
 	Model         *FormModel   `yaml:"model"`
@@ -157,6 +163,15 @@ func loadSingleConfig(path string) (*Config, error) {
 	for _, form := range config.Forms {
 		if form.DataDirectory == "" {
 			form.DataDirectory = "data/" + form.Name
+		}
+		if strings.TrimSpace(form.Category) == "" {
+			form.Category = "general"
+		}
+		if strings.TrimSpace(form.Priority) == "" {
+			form.Priority = "medium"
+		}
+		if strings.TrimSpace(form.Status) == "" {
+			form.Status = "published"
 		}
 		form.FileModTime = modTime
 	}

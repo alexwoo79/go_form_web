@@ -1,0 +1,156 @@
+server:
+  port: 8080
+  host: "localhost"
+
+database:
+  path: "data/data.db"
+  type: "sqlite"
+
+# 包含的其他配置文件（支持通配符）
+includes:
+  # - "marketing_forms.yaml"
+  # - "hr_forms.yaml"
+  # - "survey_forms.yaml"
+  # - "project_forms.yaml"
+  # 也可以使用通配符：
+  - "*.yaml"
+
+forms:
+  # 表单 1: 用户注册（核心表单）
+  - name: "user_registration"
+    title: "用户注册表单"
+    description: "欢迎注册我们的服务，请填写以下信息"
+    category: "general"
+    pinned: true
+    sort_order: 10
+    priority: "high"
+    status: "published"
+    publish_at: "2026-03-20 09:00:00"
+    # 到期后将停止提交，且主页不再显示该表单卡片
+    # 支持格式：RFC3339 / YYYY-MM-DD HH:MM:SS / YYYY-MM-DD
+    expire_at: "2026-12-31"
+    model:
+      table_name: "user_registration"
+    fields:
+      - name: "username"
+        label: "用户名"
+        type: "text"
+        placeholder: "请输入用户名"
+        required: true
+      - name: "email"
+        label: "邮箱"
+        type: "email"
+        placeholder: "请输入邮箱地址"
+        required: true
+      - name: "password"
+        label: "密码"
+        type: "password"
+        placeholder: "请输入密码"
+        required: true
+      - name: "phone"
+        label: "手机号"
+        type: "tel"
+        placeholder: "请输入手机号"
+        required: false
+      - name: "age"
+        label: "年龄"
+        type: "number"
+        placeholder: "请输入年龄"
+        required: false
+        min: 1
+        max: 150
+      - name: "gender"
+        label: "性别"
+        type: "select"
+        options:
+          - "男"
+          - "女"
+          - "其他"
+        required: false
+      - name: "hobbies"
+        label: "兴趣爱好"
+        type: "checkbox"
+        options:
+          - "阅读"
+          - "旅行"
+          - "运动"
+          - "音乐"
+          - "电影"
+        required: false
+      - name: "bio"
+        label: "个人简介"
+        type: "textarea"
+        placeholder: "请简单的介绍一下自己..."
+        required: false
+
+  # 表单 2: 活动报名（新增）
+  - name: "event_registration"
+    title: "活动报名表单"
+    description: "报名参加我们的技术沙龙活动"
+    category: "marketing"
+    pinned: false
+    sort_order: 30
+    priority: "medium"
+    status: "published"
+    publish_at: "2026-03-22 09:00:00"
+    expire_at: "2026-03-28 23:59:59"
+    model:
+      table_name: "event_registration"
+    fields:
+      - name: "name"
+        label: "姓名"
+        type: "text"
+        placeholder: "请输入您的姓名"
+        required: true
+      - name: "company"
+        label: "公司名称"
+        type: "text"
+        placeholder: "请输入公司名称"
+        required: false
+      - name: "position"
+        label: "职位"
+        type: "text"
+        placeholder: "请输入职位"
+        required: false
+      - name: "email"
+        label: "邮箱"
+        type: "email"
+        placeholder: "工作邮箱"
+        required: true
+      - name: "phone"
+        label: "手机号"
+        type: "tel"
+        placeholder: "便于联系的手机号"
+        required: true
+      - name: "session"
+        label: "选择场次"
+        type: "radio"
+        options:
+          - "上午场 (9:00-12:00)"
+          - "下午场 (14:00-17:00)"
+          - "全天场 (9:00-17:00)"
+        required: true
+      - name: "topics"
+        label: "感兴趣的话题"
+        type: "checkbox"
+        options:
+          - "AI 与大模型应用"
+          - "云原生架构"
+          - "微服务实践"
+          - "DevOps 自动化"
+          - "前端新技术"
+        required: false
+      - name: "dietary"
+        label: "饮食偏好"
+        type: "select"
+        options:
+          - "无特殊要求"
+          - "素食"
+          - "清真"
+          - "其他"
+        required: false
+      - name: "notes"
+        label: "备注说明"
+        type: "textarea"
+        placeholder: "其他需要说明的事项..."
+        required: false
