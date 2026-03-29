@@ -98,6 +98,17 @@ func (sm *SessionManager) DeleteSession(sessionID string) {
 	delete(sm.sessions, sessionID)
 }
 
+func (sm *SessionManager) DeleteSessionsByUserID(userID int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	for id, session := range sm.sessions {
+		if session.UserID == userID {
+			delete(sm.sessions, id)
+		}
+	}
+}
+
 // 清理过期会话
 func (sm *SessionManager) CleanupExpiredSessions() {
 	sm.mu.Lock()
@@ -1504,6 +1515,174 @@ func (h *Handler) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"status": "success",
 		"items":  result,
+	})
+}
+
+// CreateUserByAdminHandler 管理员新增用户
+func (h *Handler) CreateUserByAdminHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+		return
+	}
+
+	username := strings.TrimSpace(req.Username)
+	password := strings.TrimSpace(req.Password)
+	role := strings.TrimSpace(req.Role)
+	if role == "" {
+		role = "user"
+	}
+
+	if username == "" {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "用户名不能为空"})
+		return
+	}
+	if len(username) < 3 {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "用户名至少 3 位"})
+		return
+	}
+	if len(password) < 6 {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "密码至少 6 位"})
+		return
+	}
+	if role != "admin" && role != "user" {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "角色非法"})
+		return
+	}
+
+	existing, err := h.db.GetUserByUsername(username)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "查询用户失败"})
+		return
+	}
+	if existing != nil {
+		jsonResponse(w, http.StatusConflict, map[string]string{"error": "用户名已存在"})
+		return
+	}
+
+	uid, err := h.db.CreateUser(username, hashPassword(password), role)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "新增用户失败"})
+		return
+	}
+
+	jsonResponse(w, http.StatusCreated, map[string]interface{}{
+		"status":   "success",
+		"userId":   uid,
+		"username": username,
+		"role":     role,
+	})
+}
+
+// DeleteUserByAdminHandler 管理员删除用户
+func (h *Handler) DeleteUserByAdminHandler(w http.ResponseWriter, r *http.Request) {
+	operator := h.getCurrentUser(r)
+	if operator == nil {
+		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+		return
+	}
+
+	idStr := mux.Vars(r)["userId"]
+	userID, err := strconv.Atoi(strings.TrimSpace(idStr))
+	if err != nil || userID <= 0 {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "用户ID非法"})
+		return
+	}
+	if userID == operator.UserID {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "不能删除当前登录用户"})
+		return
+	}
+
+	targetUser, err := h.db.GetUserByID(userID)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "查询用户失败"})
+		return
+	}
+	if targetUser == nil {
+		jsonResponse(w, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(targetUser.Username), "admin") {
+		jsonResponse(w, http.StatusForbidden, map[string]string{"error": "admin用户不可删除"})
+		return
+	}
+
+	if err := h.db.DeleteUser(userID); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "删除用户失败"})
+		return
+	}
+
+	h.sessionMgr.DeleteSessionsByUserID(userID)
+
+	jsonResponse(w, http.StatusOK, map[string]string{"status": "success"})
+}
+
+// ChangePasswordHandler 当前登录用户修改自己的密码
+// ImportUsersHandler 管理员批量导入用户
+func (h *Handler) ImportUsersHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Users []struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+			Role     string `json:"role"`
+		} `json:"users"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+		return
+	}
+
+	type FailItem struct {
+		Username string `json:"username"`
+		Reason   string `json:"reason"`
+	}
+	failed := make([]FailItem, 0)
+	successCount := 0
+
+	for _, u := range req.Users {
+		username := strings.TrimSpace(u.Username)
+		password := strings.TrimSpace(u.Password)
+		role := strings.TrimSpace(u.Role)
+		if role == "" {
+			role = "user"
+		}
+		if len(username) < 3 {
+			failed = append(failed, FailItem{username, "用户名至少3位"})
+			continue
+		}
+		if len(password) < 6 {
+			failed = append(failed, FailItem{username, "密码至少6位"})
+			continue
+		}
+		if role != "admin" && role != "user" {
+			failed = append(failed, FailItem{username, "角色须为 user 或 admin"})
+			continue
+		}
+		existing, err := h.db.GetUserByUsername(username)
+		if err != nil {
+			failed = append(failed, FailItem{username, "查询失败"})
+			continue
+		}
+		if existing != nil {
+			failed = append(failed, FailItem{username, "用户名已存在"})
+			continue
+		}
+		if _, err = h.db.CreateUser(username, hashPassword(password), role); err != nil {
+			failed = append(failed, FailItem{username, "创建失败"})
+			continue
+		}
+		successCount++
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"total":   len(req.Users),
+		"success": successCount,
+		"failed":  failed,
 	})
 }
 

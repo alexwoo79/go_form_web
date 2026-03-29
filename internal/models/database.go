@@ -351,6 +351,12 @@ func (d *Database) ListUsers() ([]UserRecord, error) {
 	return users, rows.Err()
 }
 
+func (d *Database) DeleteUser(userID int) error {
+	query := `DELETE FROM users WHERE id = ?`
+	_, err := d.db.Exec(query, userID)
+	return err
+}
+
 func (d *Database) Query(tableName string, where string, args ...interface{}) ([]map[string]interface{}, error) {
 	query := fmt.Sprintf("SELECT * FROM `%s`", tableName)
 	if where != "" {
