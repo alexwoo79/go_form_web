@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>项目联合评审表</title>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "SimSun", serif;
+        }
+        body {
+            background: #fff;
+            padding: 20px;
+        }
+        .page {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0 auto;
+            padding: 15mm;
+            border: 1px solid #000;
+        }
+        .title {
+            text-align: center;
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+        }
+        td {
+            border: 1px solid #333;
+            padding: 5px 8px;
+            font-size: 14px;
+            vertical-align: middle;
+        }
+        .label {
+            font-weight: bold;
+            width: 140px;
+            background: #f7f7f7;
+        }
+        input, select, textarea {
+            width: 100%;
+            border: none;
+            outline: none;
+            font-size: 14px;
+            background: transparent;
+        }
+        textarea {
+            min-height: 40px;
+            resize: none;
+        }
+        .section {
+            margin-bottom: 12px;
+        }
+        .section-title {
+            font-weight: bold;
+            font-size: 15px;
+            margin: 8px 0 5px;
+        }
+        .btns {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .check-panel {
+            max-width: 210mm;
+            margin: 0 auto 12px;
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
+            background: #f8fafc;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .check-ok {
+            color: #166534;
+            font-weight: bold;
+        }
+        .check-warn {
+            color: #b45309;
+            font-weight: bold;
+        }
+        .hidden-for-pdf {
+            display: block;
+        }
+        @media print {
+            .btns,
+            .check-panel {
+                display: none;
+            }
+            body {
+                padding: 0;
+            }
+            .page {
+                border: none;
+                margin: 0;
+            }
+        }
+        button {
+            padding: 8px 20px;
+            margin: 0 10px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="check-panel" id="checkPanel">
+        正在检查模板字段匹配情况...
+    </div>
+
+    <div class="page" id="pdfContent">
+        <div class="title">项目联合评审表</div>
+
+        <div class="section">
+            <div class="section-title">一、项目基本信息</div>
+            <table>
+                <tr>
+                    <td class="label">项目名称</td>
+                    <td><input name="project_name"></td>
+                    <td class="label">项目类型</td>
+                    <td>
+                        <select name="project_type">
+                            <option>代建</option><option>设计</option><option>施工</option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="label">客户名称</td>
+                    <td><input name="client_name"></td>
+                    <td class="label">企业性质</td>
+                    <td>
+                        <select name="enterprise_nature">
+                            <option>集团内部</option><option>国有企业</option><option>民营企业</option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="label">预估合同额(万元)</td>
+                    <td><input name="contract_amount" type="number" step="0.01"></td>
+                    <td class="label">外委金额(万元)</td>
+                    <td><input name="outsourcing_amount" type="number" step="0.01"></td>
+                </tr>
+                <tr>
+                    <td class="label">工程地点</td>
+                    <td><input name="project_location"></td>
+                    <td class="label">用地面积(万㎡)</td>
+                    <td><input name="land_area" type="number" step="0.0001"></td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="section-title">二、联合体信息</div>
+            <table>
+                <tr>
+                    <td class="label">牵头方</td>
+                    <td><input name="union_leader"></td>
+                </tr>
+                <tr>
+                    <td class="label">成员方</td>
+                    <td><input name="union_member"></td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="section-title">三、人员工时计划</div>
+            <table>
+                <tr>
+                    <td class="label">工时明细</td>
+                    <td><textarea name="staff_work_hours"></textarea></td>
+                </tr>
+                <tr>
+                    <td class="label">合计工时</td>
+                    <td><input name="total_work_days" type="number"></td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="section-title">四、客户信息</div>
+            <table>
+                <tr>
+                    <td class="label">成立日期</td>
+                    <td><input name="client_setup_date" type="date"></td>
+                    <td class="label">注册资本(万元)</td>
+                    <td><input name="client_register_capital" type="number" step="0.01"></td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="section-title">五、付款节点</div>
+            <table>
+                <tr>
+                    <td class="label">明细</td>
+                    <td><textarea name="payment_nodes"></textarea></td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="section-title">六、合同条款</div>
+            <table>
+                <tr>
+                    <td class="label">付款方式</td>
+                    <td><textarea name="payment_terms"></textarea></td>
+                </tr>
+                <tr>
+                    <td class="label">违约责任</td>
+                    <td><textarea name="liability_breach"></textarea></td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="section-title">七、风险与防控</div>
+            <table>
+                <tr>
+                    <td class="label">风险提示</td>
+                    <td><textarea name="performance_risk"></textarea></td>
+                </tr>
+                <tr>
+                    <td class="label">防控措施</td>
+                    <td><textarea name="risk_prevention"></textarea></td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="section-title">八、经济测算</div>
+            <table>
+                <tr>
+                    <td class="label">总成本(万元)</td>
+                    <td><input name="total_project_cost" type="number" step="0.01"></td>
+                </tr>
+                <tr>
+                    <td class="label">毛利润(万元)</td>
+                    <td><input name="gross_profit" type="number" step="0.01"></td>
+                </tr>
+                <tr>
+                    <td class="label">毛利率(%)</td>
+                    <td><input name="gross_profit_margin" type="number" step="0.01"></td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="section-title">九、合同与成本补充信息（YAML补齐字段）</div>
+            <table>
+                <tr>
+                    <td class="label">业务拓展内容</td>
+                    <td><input name="business_content"></td>
+                    <td class="label">总计容建筑面积(万㎡)</td>
+                    <td><input name="total_build_area" type="number" step="0.0001"></td>
+                </tr>
+                <tr>
+                    <td class="label">设计服务周期(日历天)</td>
+                    <td><input name="design_period" type="number"></td>
+                    <td class="label">总体控制工期(日历天)</td>
+                    <td><input name="total_control_period" type="number"></td>
+                </tr>
+                <tr>
+                    <td class="label">牵头方职责</td>
+                    <td colspan="3"><textarea name="leader_duty"></textarea></td>
+                </tr>
+                <tr>
+                    <td class="label">成员方职责</td>
+                    <td colspan="3"><textarea name="member_duty"></textarea></td>
+                </tr>
+                <tr>
+                    <td class="label">法定代表人</td>
+                    <td><input name="client_legal_rep"></td>
+                    <td class="label">经营状态</td>
+                    <td>
+                        <select name="client_business_status">
+                            <option>存续</option>
+                            <option>注销</option>
+                            <option>吊销</option>
+                            <option>停业</option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="label">购地总面积(公顷)</td>
+                    <td><input name="land_total_area" type="number" step="0.01"></td>
+                    <td class="label">土地成交总价(亿元)</td>
+                    <td><input name="land_transaction_price" type="number" step="0.01"></td>
+                </tr>
+                <tr>
+                    <td class="label">合同总金额(含税)</td>
+                    <td><input name="total_contract_price" type="number" step="0.01"></td>
+                    <td class="label">我司份额(万元)</td>
+                    <td><input name="our_share_amount" type="number" step="0.01"></td>
+                </tr>
+                <tr>
+                    <td class="label">直接业务费用(万元)</td>
+                    <td><input name="direct_business_cost" type="number" step="0.01"></td>
+                    <td class="label">内部外协/分包费(万元)</td>
+                    <td><input name="internal_outsource_cost" type="number" step="0.01"></td>
+                </tr>
+                <tr>
+                    <td class="label">差旅交通费(万元)</td>
+                    <td><input name="travel_cost" type="number" step="0.01"></td>
+                    <td class="label">分摊成本(万元)</td>
+                    <td><input name="allocated_cost" type="number" step="0.01"></td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="section-title">十、签字确认</div>
+            <table>
+                <tr>
+                    <td class="label">设计研究部</td>
+                    <td><input name="design_dept_sign"></td>
+                    <td class="label">项目管理部</td>
+                    <td><input name="pm_dept_sign"></td>
+                </tr>
+                <tr>
+                    <td class="label">综合管理部</td>
+                    <td><input name="admin_dept_sign"></td>
+                    <td class="label">备注</td>
+                    <td><input name="remark"></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="btns">
+        <button onclick="fillDemoData()">填充示例数据</button>
+        <button onclick="exportPDF()">导出PDF</button>
+        <button onclick="alert('提交成功')">提交保存</button>
+    </div>
+
+    <script>
+        const YAML_FIELD_NAMES = [
+            'project_name', 'project_type', 'business_content', 'client_name', 'enterprise_nature',
+            'contract_amount', 'outsourcing_amount', 'project_location', 'land_area', 'total_build_area',
+            'design_period', 'total_control_period', 'union_leader', 'union_member', 'leader_duty',
+            'member_duty', 'staff_work_hours', 'total_work_days', 'client_setup_date', 'client_register_capital',
+            'client_legal_rep', 'client_business_status', 'land_total_area', 'land_transaction_price',
+            'payment_nodes', 'total_contract_price', 'our_share_amount', 'payment_terms', 'liability_breach',
+            'performance_risk', 'risk_prevention', 'direct_business_cost', 'internal_outsource_cost',
+            'travel_cost', 'allocated_cost', 'total_project_cost', 'gross_profit', 'gross_profit_margin',
+            'design_dept_sign', 'pm_dept_sign', 'admin_dept_sign', 'remark'
+        ]
+
+        const DEMO_DATA = {
+            project_name: '贵阳普天1#地块项目（贵阳SM-08-09-01地块项目）',
+            project_type: '代建',
+            business_content: '建筑概念方案设计服务',
+            client_name: '贵阳普天德杰同德房地产开发有限公司',
+            enterprise_nature: '民营企业',
+            contract_amount: '50',
+            outsourcing_amount: '0',
+            project_location: '贵州省贵阳市云岩区',
+            land_area: '4.1545',
+            total_build_area: '21.15',
+            design_period: '30',
+            total_control_period: '60',
+            union_leader: '贵州公司',
+            union_member: '中铁房地产集团设计咨询有限公司',
+            leader_duty: '负责项目定位咨询报告及整体项目联络、协调、接收指令。',
+            member_duty: '负责概念方案设计成果交付与配合汇报。',
+            staff_work_hours: '张集峰-20日；王燕皓-60日；张华-43日；刘璟-17日。',
+            total_work_days: '140',
+            client_setup_date: '2013-07-02',
+            client_register_capital: '5000',
+            client_legal_rep: '卢英',
+            client_business_status: '存续',
+            land_total_area: '19.47',
+            land_transaction_price: '2.1555',
+            payment_nodes: '详见合同第七条付款节点，按阶段成果提交后支付。',
+            total_contract_price: '50',
+            our_share_amount: '30',
+            payment_terms: '达到合同约定支付进度前10日发出书面通知。',
+            liability_breach: '逾期付款可暂停设计并按约定收取违约金。',
+            performance_risk: '客户诉讼案件较多，存在履约及回款风险。',
+            risk_prevention: '先收预付款、节点验收后提交下一阶段成果。',
+            direct_business_cost: '8.50',
+            internal_outsource_cost: '6.00',
+            travel_cost: '1.20',
+            allocated_cost: '4.30',
+            total_project_cost: '20.00',
+            gross_profit: '30.00',
+            gross_profit_margin: '60.00',
+            design_dept_sign: '张金峰',
+            pm_dept_sign: '乔坤',
+            admin_dept_sign: '梁防雨',
+            remark: '本页为模板填充示例，可按实际提交内容替换。'
+        }
+
+        function getTemplateFieldNames() {
+            const nodes = document.querySelectorAll('#pdfContent input[name], #pdfContent select[name], #pdfContent textarea[name]')
+            return Array.from(nodes)
+                .map(node => node.getAttribute('name'))
+                .filter(Boolean)
+        }
+
+        function checkTemplateMatch() {
+            const templateNames = new Set(getTemplateFieldNames())
+            const yamlNames = new Set(YAML_FIELD_NAMES)
+            const missing = YAML_FIELD_NAMES.filter(name => !templateNames.has(name))
+            const extra = Array.from(templateNames).filter(name => !yamlNames.has(name))
+
+            const panel = document.getElementById('checkPanel')
+            if (missing.length === 0) {
+                panel.innerHTML = `
+                    <div class="check-ok">字段匹配检查：通过（模板字段已覆盖 YAML 全部 42 项）</div>
+                    <div>当前模板字段数：${templateNames.size}</div>
+                    <div>额外字段：${extra.length ? extra.join('、') : '无'}</div>
+                `
+                return
+            }
+
+            panel.innerHTML = `
+                <div class="check-warn">字段匹配检查：未通过</div>
+                <div>缺失字段(${missing.length})：${missing.join('、')}</div>
+                <div>额外字段(${extra.length})：${extra.length ? extra.join('、') : '无'}</div>
+            `
+        }
+
+        function fillDemoData() {
+            Object.entries(DEMO_DATA).forEach(([key, value]) => {
+                const field = document.querySelector(`[name="${key}"]`)
+                if (field) {
+                    field.value = value
+                }
+            })
+        }
+
+        function exportPDF() {
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const content = document.getElementById('pdfContent');
+            
+            html2canvas(content, { scale: 2 }).then(canvas => {
+                const imgData = canvas.toDataURL('image/jpeg', 1.0);
+                const pageWidth = 210;
+                const pageHeight = 297;
+                const imgWidth = pageWidth;
+                const imgHeight = canvas.height * imgWidth / canvas.width;
+                let heightLeft = imgHeight;
+                let position = 0;
+
+                pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pageHeight;
+
+                while (heightLeft > 0) {
+                    position = heightLeft - imgHeight;
+                    pdf.addPage();
+                    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+                    heightLeft -= pageHeight;
+                }
+
+                pdf.save('项目联合评审表.pdf');
+            });
+        }
+
+        fillDemoData()
+        checkTemplateMatch()
+    </script>
+</body>
+</html>

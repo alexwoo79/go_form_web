@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 interface Field {
@@ -11,6 +11,7 @@ interface Field {
   Options: string[] | null
   Min: number | null
   Max: number | null
+  Step: number | null
 }
 
 interface FormDef {
@@ -29,6 +30,8 @@ const submitting = ref(false)
 const submitted = ref(false)
 const error = ref('')
 const submitError = ref('')
+const runningDistanceHint = ref('支持输入小数，最多 3 位，例如 21.097')
+const runningDistanceError = ref('')
 
 function isShareMode(): boolean {
   return typeof route.params.token === 'string' && route.params.token.trim() !== ''
@@ -46,6 +49,101 @@ function getSubmitPath(): string {
     return `/api/public/submit/${route.params.token}`
   }
   return `/api/submit/${route.params.formName}`
+}
+
+function parseDurationToSeconds(raw: unknown): number | null {
+  if (typeof raw !== 'string') return null
+  const value = raw.trim()
+  if (!value) return null
+
+  const parts = value.split(':').map((p) => p.trim())
+  if (parts.length !== 2 && parts.length !== 3) return null
+  if (parts.some((p) => p === '' || !/^\d+$/.test(p))) return null
+
+  if (parts.length === 2) {
+    const minutes = Number(parts[0])
+    const seconds = Number(parts[1])
+    if (seconds >= 60) return null
+    return minutes * 60 + seconds
+  }
+
+  const hours = Number(parts[0])
+  const minutes = Number(parts[1])
+  const seconds = Number(parts[2])
+  if (minutes >= 60 || seconds >= 60) return null
+  return hours * 3600 + minutes * 60 + seconds
+}
+
+function updateAveragePace() {
+  if (!formDef.value) return
+
+  const hasPaceFields = formDef.value.Fields.some((f) => f.Name === 'running_distance')
+    && formDef.value.Fields.some((f) => f.Name === 'total_time')
+    && formDef.value.Fields.some((f) => f.Name === 'average_pace')
+  if (!hasPaceFields) return
+
+  const distanceRaw = formData.value.running_distance
+  const distance = typeof distanceRaw === 'number' ? distanceRaw : Number(distanceRaw)
+  const totalSeconds = parseDurationToSeconds(formData.value.total_time)
+
+  if (!Number.isFinite(distance) || distance <= 0 || totalSeconds === null || totalSeconds <= 0) {
+    formData.value.average_pace = ''
+    return
+  }
+
+  const paceSeconds = Math.round(totalSeconds / distance)
+  const paceMinutes = Math.floor(paceSeconds / 60)
+  const remainSeconds = paceSeconds % 60
+  formData.value.average_pace = `${paceMinutes}:${String(remainSeconds).padStart(2, '0')}`
+}
+
+function isReadonlyField(field: Field): boolean {
+  return field.Name === 'average_pace'
+}
+
+function isRunningDistanceField(field: Field): boolean {
+  return field.Name === 'running_distance'
+}
+
+function getNumberStep(field: Field): string | number {
+  if (isRunningDistanceField(field)) return '0.001'
+  return field.Step ?? 'any'
+}
+
+function validateRunningDistance(raw: unknown): string {
+  if (raw === '' || raw === null || raw === undefined) return ''
+  const value = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(value)) return '跑步距离必须是有效数字'
+  if (value <= 0) return '跑步距离必须大于 0'
+
+  const scaled = value * 1000
+  if (Math.abs(scaled-Math.round(scaled)) > 1e-9) {
+    return '跑步距离最多保留 3 位小数'
+  }
+  return ''
+}
+
+function updateRunningDistanceFeedback() {
+  const validationError = validateRunningDistance(formData.value.running_distance)
+  runningDistanceError.value = validationError
+
+  if (validationError) {
+    runningDistanceHint.value = '示例：21.097（公里）'
+    return
+  }
+
+  const raw = formData.value.running_distance
+  if (raw === '' || raw === null || raw === undefined) {
+    runningDistanceHint.value = '支持输入小数，最多 3 位，例如 21.097'
+    return
+  }
+
+  const value = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(value) || value <= 0) {
+    runningDistanceHint.value = '示例：21.097（公里）'
+    return
+  }
+  runningDistanceHint.value = `当前距离：${value.toFixed(3)} 公里`
 }
 
 onMounted(async () => {
@@ -81,8 +179,21 @@ onMounted(async () => {
   }
 })
 
+watch(
+  () => [formData.value.running_distance, formData.value.total_time, formDef.value?.Name],
+  () => {
+    updateRunningDistanceFeedback()
+    updateAveragePace()
+  },
+)
+
 async function submit() {
   submitError.value = ''
+  updateRunningDistanceFeedback()
+  if (runningDistanceError.value) {
+    submitError.value = runningDistanceError.value
+    return
+  }
   submitting.value = true
   try {
     const res = await fetch(getSubmitPath(), {
@@ -224,16 +335,26 @@ function getRangeTicks(field: Field): number[] {
             </div>
 
             <!-- number -->
-            <input
-              v-else-if="field.Type === 'number'"
-              :id="field.Name"
-              type="number"
-              v-model.number="formData[field.Name]"
-              :placeholder="field.Placeholder"
-              :required="field.Required"
-              :min="field.Min ?? undefined"
-              :max="field.Max ?? undefined"
-            />
+            <template v-else-if="field.Type === 'number'">
+              <input
+                :id="field.Name"
+                type="number"
+                v-model.number="formData[field.Name]"
+                :placeholder="field.Placeholder"
+                :required="field.Required"
+                :min="field.Min ?? undefined"
+                :max="field.Max ?? undefined"
+                :step="getNumberStep(field)"
+                :readonly="isReadonlyField(field)"
+                :class="{ 'input-invalid': isRunningDistanceField(field) && !!runningDistanceError }"
+              />
+              <p v-if="isRunningDistanceField(field) && runningDistanceError" class="field-inline-error">
+                {{ runningDistanceError }}
+              </p>
+              <p v-else-if="isRunningDistanceField(field)" class="field-inline-hint">
+                {{ runningDistanceHint }}
+              </p>
+            </template>
 
             <!-- range slider -->
             <div v-else-if="field.Type === 'range'" class="range-wrap">
@@ -259,6 +380,7 @@ function getRangeTicks(field: Field): number[] {
               v-model="formData[field.Name]"
               :placeholder="field.Placeholder"
               :required="field.Required"
+              :readonly="isReadonlyField(field)"
             />
           </div>
 
@@ -447,6 +569,23 @@ input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--brand-600);
   box-shadow: 0 0 0 3px rgba(75, 104, 242, .13);
+}
+
+.input-invalid {
+  border-color: #e53e3e !important;
+  box-shadow: 0 0 0 3px rgba(229, 62, 62, .12) !important;
+}
+
+.field-inline-hint {
+  margin: .35rem 0 0;
+  color: #5f6b83;
+  font-size: .82rem;
+}
+
+.field-inline-error {
+  margin: .35rem 0 0;
+  color: #e53e3e;
+  font-size: .82rem;
 }
 
 .option-group { display: flex; flex-wrap: wrap; gap: .6rem; }

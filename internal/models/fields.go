@@ -9,4 +9,5 @@ type FieldInfo struct {
 	Options     []string
 	Min         *float64
 	Max         *float64
+	Step        *float64
 }

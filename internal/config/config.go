@@ -53,6 +53,7 @@ type FormField struct {
 	Options     []string `yaml:"options"`
 	Min         *float64 `yaml:"min"`
 	Max         *float64 `yaml:"max"`
+	Step        *float64 `yaml:"step"`
 	Regex       string   `yaml:"regex"`
 }
 

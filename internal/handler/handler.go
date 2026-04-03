@@ -160,6 +160,7 @@ type FieldInfo struct {
 	Options     []string
 	Min         *float64
 	Max         *float64
+	Step        *float64
 }
 
 func New(db *models.Database, formConfigs []FormInfo, configPath string, reloadFn func() ([]FormInfo, error)) *Handler {
@@ -287,6 +288,7 @@ func convertToModelsField(fi FieldInfo) models.FieldInfo {
 		Options:     fi.Options,
 		Min:         fi.Min,
 		Max:         fi.Max,
+		Step:        fi.Step,
 	}
 }
 
@@ -1862,6 +1864,116 @@ func (h *Handler) resolveConfigFilePath(configSource string) (string, error) {
 	return target, nil
 }
 
+func getFormNameFromNode(node interface{}) string {
+	switch v := node.(type) {
+	case map[string]interface{}:
+		name, _ := v["name"].(string)
+		return strings.TrimSpace(name)
+	case map[interface{}]interface{}:
+		raw, ok := v["name"]
+		if !ok {
+			return ""
+		}
+		name, _ := raw.(string)
+		return strings.TrimSpace(name)
+	default:
+		return ""
+	}
+}
+
+// extractEditableFormsYAML 从完整配置中提取仅可编辑的当前 forms 项
+func extractEditableFormsYAML(content []byte, formName string) ([]byte, error) {
+	var root map[string]interface{}
+	if err := yaml.Unmarshal(content, &root); err != nil {
+		return nil, err
+	}
+
+	formsRaw, ok := root["forms"]
+	if !ok {
+		return nil, fmt.Errorf("未找到 forms 配置")
+	}
+
+	forms, ok := formsRaw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("forms 配置格式无效")
+	}
+
+	var current interface{}
+	for _, form := range forms {
+		if getFormNameFromNode(form) == formName {
+			current = form
+			break
+		}
+	}
+	if current == nil {
+		return nil, fmt.Errorf("未找到表单 %s 的配置", formName)
+	}
+
+	editable := map[string]interface{}{
+		"forms": []interface{}{current},
+	}
+
+	return yaml.Marshal(editable)
+}
+
+// mergeFormsIntoConfig 将仅包含当前 forms 项的编辑内容合并回完整配置
+func mergeFormsIntoConfig(originContent []byte, editedContent []byte, formName string) ([]byte, error) {
+	var origin map[string]interface{}
+	if err := yaml.Unmarshal(originContent, &origin); err != nil {
+		return nil, fmt.Errorf("原配置解析失败: %w", err)
+	}
+
+	var edited map[string]interface{}
+	if err := yaml.Unmarshal(editedContent, &edited); err != nil {
+		return nil, fmt.Errorf("编辑内容解析失败: %w", err)
+	}
+
+	for k := range edited {
+		if k != "forms" {
+			return nil, fmt.Errorf("仅允许编辑 forms 配置")
+		}
+	}
+
+	forms, ok := edited["forms"]
+	if !ok {
+		return nil, fmt.Errorf("缺少 forms 配置")
+	}
+	editedForms, ok := forms.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("forms 配置格式无效")
+	}
+	if len(editedForms) != 1 {
+		return nil, fmt.Errorf("仅允许编辑当前表单对应项")
+	}
+	if getFormNameFromNode(editedForms[0]) != formName {
+		return nil, fmt.Errorf("仅允许编辑表单 %s", formName)
+	}
+
+	originFormsRaw, ok := origin["forms"]
+	if !ok {
+		return nil, fmt.Errorf("原配置缺少 forms 配置")
+	}
+	originForms, ok := originFormsRaw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("原配置 forms 格式无效")
+	}
+
+	replaced := false
+	for i, form := range originForms {
+		if getFormNameFromNode(form) == formName {
+			originForms[i] = editedForms[0]
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		return nil, fmt.Errorf("原配置中未找到表单 %s", formName)
+	}
+
+	origin["forms"] = originForms
+	return yaml.Marshal(origin)
+}
+
 // GetFormConfigHandler 返回表单所在的 YAML 文件原始内容
 func (h *Handler) GetFormConfigHandler(w http.ResponseWriter, r *http.Request) {
 	formName := mux.Vars(r)["formName"]
@@ -1883,10 +1995,16 @@ func (h *Handler) GetFormConfigHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	editableContent, err := extractEditableFormsYAML(content, formName)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "配置解析失败: " + err.Error()})
+		return
+	}
+
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"formName": formName,
 		"source":   filepath.Base(filePath),
-		"content":  string(content),
+		"content":  string(editableContent),
 	})
 }
 
@@ -1919,9 +2037,21 @@ func (h *Handler) SaveFormConfigHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	originContent, err := os.ReadFile(filePath)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "读取原配置失败: " + err.Error()})
+		return
+	}
+
+	mergedContent, err := mergeFormsIntoConfig(originContent, []byte(req.Content), formName)
+	if err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
 	// 安全写入：先写临时文件再改名
 	tmpPath := filePath + ".tmp"
-	if err := os.WriteFile(tmpPath, []byte(req.Content), 0644); err != nil {
+	if err := os.WriteFile(tmpPath, mergedContent, 0644); err != nil {
 		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "写入手失败: " + err.Error()})
 		return
 	}

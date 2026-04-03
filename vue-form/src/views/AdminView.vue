@@ -243,11 +243,42 @@ async function generateShareLink(form: FormStat) {
 
 async function copyShareLink() {
   if (!generatedShareURL.value) return
+  shareError.value = ''
+
+  // Clipboard API requires secure contexts. Fallback keeps copy usable on intranet HTTP.
+  const fallbackCopy = (text: string) => {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', 'readonly')
+    textarea.style.position = 'fixed'
+    textarea.style.left = '-9999px'
+    document.body.appendChild(textarea)
+    textarea.select()
+    textarea.setSelectionRange(0, textarea.value.length)
+    let copied = false
+    try {
+      copied = document.execCommand('copy')
+    } finally {
+      document.body.removeChild(textarea)
+    }
+    return copied
+  }
+
   try {
-    await navigator.clipboard.writeText(generatedShareURL.value)
-    shareCopied.value = true
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(generatedShareURL.value)
+      shareCopied.value = true
+      return
+    }
+
+    shareCopied.value = fallbackCopy(generatedShareURL.value)
   } catch {
+    shareCopied.value = fallbackCopy(generatedShareURL.value)
+  }
+
+  if (!shareCopied.value) {
     shareCopied.value = false
+    shareError.value = '复制失败，请手动选择链接并复制。'
   }
 }
 

@@ -1,0 +1,239 @@
+forms:
+    - category: survey
+      description: 项目联合评审表（建筑概念方案设计服务）
+      expire_at: "2026-12-31"
+      fields:
+        - label: 项目名称
+          name: project_name
+          placeholder: 请输入项目名称
+          required: true
+          type: text
+        - label: 项目类型
+          name: project_type
+          options:
+            - 代建
+            - 设计
+            - 施工
+            - 监理
+            - 咨询
+          required: true
+          type: select
+        - label: 业务拓展内容
+          name: business_content
+          placeholder: 请填写服务内容
+          required: true
+          type: text
+        - label: 客户名称
+          name: client_name
+          placeholder: 请输入客户公司名称
+          required: true
+          type: text
+        - label: 企业性质
+          name: enterprise_nature
+          options:
+            - 集团内部
+            - 系统内部
+            - 国有企业
+            - 民营企业
+          required: true
+          type: select
+        - label: 预估合同额（万元）
+          min: 0
+          name: contract_amount
+          required: true
+          step: 0.01
+          type: number
+        - label: 外委金额（万元）
+          min: 0
+          name: outsourcing_amount
+          required: true
+          step: 0.01
+          type: number
+        - label: 工程地点
+          name: project_location
+          placeholder: 省/市/区
+          required: true
+          type: text
+        - label: 项目用地面积（万㎡）
+          min: 0
+          name: land_area
+          required: true
+          step: 0.0001
+          type: number
+        - label: 总计容建筑面积（万㎡）
+          min: 0
+          name: total_build_area
+          required: true
+          step: 0.0001
+          type: number
+        - label: 设计服务周期（日历天）
+          min: 0
+          name: design_period
+          required: true
+          type: number
+        - label: 总体控制工期（日历天）
+          min: 0
+          name: total_control_period
+          required: true
+          type: number
+        - label: 联合体牵头方
+          name: union_leader
+          placeholder: 中铁房地产集团(贵州)有限公司
+          required: true
+          type: text
+        - label: 联合体成员方
+          name: union_member
+          placeholder: 中铁房地产集团设计咨询有限公司
+          required: true
+          type: text
+        - label: 牵头方职责
+          name: leader_duty
+          required: true
+          type: textarea
+        - label: 成员方职责
+          name: member_duty
+          required: true
+          type: textarea
+        - label: 项目计划投入人员工时表
+          name: staff_work_hours
+          placeholder: 示例：张是峰-建筑概念方案设计-20日；王燕皓-60日
+          required: true
+          type: textarea
+        - label: 计划工时小计
+          min: 0
+          name: total_work_days
+          required: true
+          type: number
+        - label: 客户成立日期
+          name: client_setup_date
+          required: true
+          type: date
+        - label: 注册资本（万元）
+          min: 0
+          name: client_register_capital
+          required: true
+          step: 0.01
+          type: number
+        - label: 法定代表人
+          name: client_legal_rep
+          required: true
+          type: text
+        - label: 经营状态
+          name: client_business_status
+          options:
+            - 存续
+            - 注销
+            - 吊销
+            - 停业
+          required: true
+          type: select
+        - label: 购地总面积（公顷）
+          min: 0
+          name: land_total_area
+          required: true
+          step: 0.01
+          type: number
+        - label: 土地成交总价（亿元）
+          min: 0
+          name: land_transaction_price
+          required: true
+          step: 0.01
+          type: number
+        - label: 付款节点明细
+          name: payment_nodes
+          required: true
+          type: textarea
+        - label: 合同总金额（含税）
+          min: 0
+          name: total_contract_price
+          required: true
+          step: 0.01
+          type: number
+        - label: 我司份额（万元）
+          min: 0
+          name: our_share_amount
+          required: true
+          step: 0.01
+          type: number
+        - label: 付款方式说明
+          name: payment_terms
+          required: true
+          type: textarea
+        - label: 违约责任要点
+          name: liability_breach
+          required: true
+          type: textarea
+        - label: 履约风险提示
+          name: performance_risk
+          required: true
+          type: textarea
+        - label: 风险防控措施
+          name: risk_prevention
+          required: true
+          type: textarea
+        - label: 直接业务费用（万元）
+          min: 0
+          name: direct_business_cost
+          required: true
+          step: 0.01
+          type: number
+        - label: 内部外协/分包费（万元）
+          min: 0
+          name: internal_outsource_cost
+          required: true
+          step: 0.01
+          type: number
+        - label: 差旅交通费（万元）
+          min: 0
+          name: travel_cost
+          required: true
+          step: 0.01
+          type: number
+        - label: 分摊成本（万元）
+          min: 0
+          name: allocated_cost
+          required: true
+          step: 0.01
+          type: number
+        - label: 项目总成本（万元）
+          min: 0
+          name: total_project_cost
+          required: true
+          step: 0.01
+          type: number
+        - label: 项目毛利润（万元）
+          min: 0
+          name: gross_profit
+          required: true
+          step: 0.01
+          type: number
+        - label: 毛利率（%）
+          min: 0
+          name: gross_profit_margin
+          required: true
+          step: 0.01
+          type: number
+        - label: 设计研究部签字
+          name: design_dept_sign
+          required: false
+          type: text
+        - label: 项目管理部签字
+          name: pm_dept_sign
+          required: false
+          type: text
+        - label: 综合管理部签字
+          name: admin_dept_sign
+          required: false
+          type: text
+        - label: 补充备注
+          name: remark
+          required: false
+          type: textarea
+      model:
+        table_name: survey_project_joint_review
+      name: guiyang_putian_project_review
+      priority: high
+      publish_at: "2026-04-03 00:00:00"
+      sort_order: 460
+      status: published
+      title: 项目联合评审表

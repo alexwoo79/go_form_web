@@ -115,6 +115,7 @@ func main() {
 				Options:     f.Options,
 				Min:         f.Min,
 				Max:         f.Max,
+				Step:        f.Step,
 			})
 		}
 
@@ -153,6 +154,7 @@ func main() {
 				Options:     f.Options,
 				Min:         f.Min,
 				Max:         f.Max,
+				Step:        f.Step,
 			}
 		}
 
@@ -191,6 +193,7 @@ func main() {
 					Options:     f.Options,
 					Min:         f.Min,
 					Max:         f.Max,
+					Step:        f.Step,
 				})
 			}
 			tn := fc.Model.TableName

@@ -1,0 +1,88 @@
+forms:
+  - category: survey
+    description: 长跑运动员日常训练数据收集表单，支持距离、时间录入并自动计算配速
+    expire_at: "2026-12-31"
+    fields:
+      - label: 教练姓名
+        name: coach_name
+        placeholder: 请填写教练姓名
+        required: true
+        type: text
+
+      - label: 运动员姓名
+        name: athlete_name
+        placeholder: 请填写运动员姓名
+        required: true
+        type: text
+
+      - label: 训练项目
+        name: training_type
+        options:
+          - 轻松跑
+          - 节奏跑
+          - 间歇跑
+          - 长距离慢跑LSD
+          - 冲刺训练
+          - 核心力量
+          - 恢复跑
+        required: true
+        type: select
+
+      - label: 训练日期
+        name: training_date
+        required: true
+        type: date
+
+      - label: 跑步距离
+        name: running_distance
+        placeholder: 单位：公里，例如 8.5
+        required: true
+        type: number
+        min: 0
+        step: 0.01
+
+      - label: 总用时
+        name: total_time
+        placeholder: 格式：mm:ss 或 hh:mm:ss，例如 35:45
+        required: true
+        type: text
+
+      - label: 平均配速
+        name: average_pace
+        placeholder: 系统自动计算，单位：分/公里
+        required: false
+        type: text
+        readonly: true
+
+      - label: 平均心率
+        name: average_heart_rate
+        placeholder: 单位：bpm，无设备可不填
+        required: false
+        type: number
+        min: 0
+
+      - label: 主观疲劳度
+        name: fatigue_level
+        options:
+          - 1（非常轻松）
+          - 2（轻松）
+          - 3（略吃力）
+          - 4（吃力）
+          - 5（非常吃力）
+        required: true
+        type: radio
+
+      - label: 训练感受与反馈
+        name: training_feedback
+        placeholder: 描述身体状态、呼吸、腿部感受、异常情况等
+        required: false
+        type: textarea
+
+    model:
+      table_name: survey_running_training_record
+    name: running_training_data_collection
+    priority: medium
+    publish_at: "2026-04-01 10:00:00"
+    sort_order: 450
+    status: published
+    title: 长跑训练数据收集表
